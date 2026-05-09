@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+
+# Falls jemand /index.html direkt aufruft, auf / leiten (saubere URLs)
+[[redirects]]
+  from = "/index.html"
+  to = "/"
+  status = 301
+  force = false

@@ -1,0 +1,3353 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1e3a8a">
+<title>Kompass · Wettbewerbs-Cockpit</title>
+<meta name="description" content="iPad-Cockpit für Wettbewerbsflüge im Heißluftballon. Tasks, Live-GPS, intelligente Trajektorie, Höhenprofil-Empfehlung.">
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="application-name" content="Kompass">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kompass">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- Icons -->
+<link rel="icon" type="image/x-icon" href="/icons/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+
+<style>
+/* ============================================================
+   KOMPASS — iPad-Cockpit für Wettbewerbs-Ballonflüge
+   ============================================================ */
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* === Theme: Day Mode (default) === */
+:root {
+  --bg-app: #f4f4f6;
+  --bg-panel: #ffffff;
+  --bg-cell: #f8f9fb;
+  --bg-cell-hi: #ebeef3;
+  --border: #d4d8de;
+  --border-strong: #a8b0bc;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent: #1e3a8a;
+  --accent-light: #3b82f6;
+  --positive: #15803d;
+  --negative: #b91c1c;
+  --target-active: #db2777;
+  --trajectory: #06b6d4;
+  --shadow: 0 1px 3px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-lg: 0 4px 12px rgba(15,23,42,0.12);
+}
+
+/* === Theme: Night Mode === */
+body.theme-night {
+  --bg-app: #0a0e16;
+  --bg-panel: #141a26;
+  --bg-cell: #1a2030;
+  --bg-cell-hi: #232b3d;
+  --border: #2a3245;
+  --border-strong: #3a4560;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --accent: #60a5fa;
+  --accent-light: #93c5fd;
+  --positive: #4ade80;
+  --negative: #f87171;
+  --target-active: #f472b6;
+  --trajectory: #22d3ee;
+  --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* === Hauptlayout: Karte + Konsole === */
+#app {
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  gap: 0;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr auto;
+  position: relative;
+}
+
+.map-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  min-height: 0;
+}
+.map-wrap.picking,
+.map-wrap.picking .leaflet-container {
+  cursor: crosshair !important;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-app);
+}
+
+/* === Konsole === */
+#console {
+  background: var(--bg-panel);
+  border-top: 2px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 -6px 16px rgba(0,0,0,0.22);
+  max-height: 38vh;
+}
+
+.console-header {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-cell);
+  flex-shrink: 0;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.console-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.console-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+}
+
+.status-bar-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.console-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  width: 36px; height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.icon-btn:hover {
+  background: var(--bg-cell-hi);
+  color: var(--text-primary);
+}
+.icon-btn:active {
+  background: var(--bg-cell-hi);
+  transform: scale(0.94);
+}
+
+/* === Live-Daten-Zellen === */
+.data-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: var(--accent);
+  flex-shrink: 0;
+  border-top: 3px solid var(--accent);
+  border-bottom: 3px solid var(--accent);
+}
+
+.data-cell {
+  background: var(--bg-cell);
+  padding: 6px 10px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 56px;
+}
+
+.data-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-light);
+  margin-bottom: 2px;
+}
+
+.data-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  font-feature-settings: 'tnum' 1;
+  color: var(--text-primary);
+  font-family: -apple-system, 'SF Mono', 'Menlo', monospace;
+}
+
+.data-unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+.data-sub {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: -apple-system, 'SF Mono', 'Menlo', monospace;
+  font-feature-settings: 'tnum' 1;
+  margin-top: 2px;
+  line-height: 1;
+}
+.data-sub .data-unit {
+  font-size: 10px;
+}
+
+.data-cell.positive .data-value { color: var(--positive); }
+.data-cell.negative .data-value { color: var(--negative); }
+
+.data-cell.no-fix .data-value {
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+/* === Status-Indikator === */
+.status-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.status-dot.ok { background: var(--positive); }
+.status-dot.warn { background: #f59e0b; }
+.status-dot.err { background: var(--negative); }
+.status-dot.pulsing {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* === Target-Info-Panel === */
+.target-panel {
+  background: var(--bg-panel);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--target-active);
+  flex-shrink: 0;
+}
+
+.target-panel.empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  padding: 10px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.target-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.target-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--target-active);
+}
+
+.target-distance {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-feature-settings: 'tnum' 1;
+}
+
+.target-profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.target-profile-cell {
+  background: var(--bg-cell);
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.target-profile-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.target-profile-value {
+  font-size: 17px;
+  font-weight: 700;
+  font-feature-settings: 'tnum' 1;
+  color: var(--text-primary);
+}
+
+.target-warning {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 3px solid #f59e0b;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-radius: 3px;
+}
+
+/* === Tasks-Liste === */
+.tasks-section {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+}
+
+.tasks-header {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-cell);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 44px;
+}
+
+.tasks-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tasks-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 10px;
+  letter-spacing: 0;
+}
+
+.tasks-header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.task-icon-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: var(--bg-cell-hi);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.task-icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+.task-icon-btn:hover {
+  background: var(--bg-cell-hi);
+  color: var(--text-primary);
+}
+.task-icon-btn:active { transform: scale(0.94); }
+.task-icon-btn.primary {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 2px 8px rgba(30, 58, 138, 0.3);
+}
+.task-icon-btn.primary:hover {
+  background: var(--accent);
+  color: white;
+  filter: brightness(1.1);
+}
+
+.task-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-panel);
+  min-height: 52px;
+}
+.task-row:active { background: var(--bg-cell-hi); }
+.task-row.active {
+  background: linear-gradient(to right, rgba(219, 39, 119, 0.12), transparent);
+  border-left: 4px solid var(--target-active);
+  padding-left: 8px;
+}
+
+.task-num {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.task-row.active .task-num { background: var(--target-active); }
+
+.task-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.task-target {
+  font-size: 15px;
+  font-weight: 600;
+  font-feature-settings: 'tnum' 1;
+  color: var(--text-primary);
+  margin-top: 1px;
+}
+
+.task-distance {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-feature-settings: 'tnum' 1;
+  flex-shrink: 0;
+}
+
+.task-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* === Floating Action Button (schwebt am Übergang Karte/Konsole) === */
+.fab {
+  position: absolute;
+  right: 14px;
+  /* Vertikal: knapp oberhalb der Konsole, halb überlappend mit der Trennlinie */
+  bottom: calc(38vh - 26px);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 8px 20px rgba(30, 58, 138, 0.4), 0 2px 6px rgba(0,0,0,0.15);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  z-index: 600;
+  padding: 0;
+}
+@media (orientation: landscape) and (min-width: 1024px) {
+  .fab { bottom: calc(34vh - 26px); }
+}
+.fab svg {
+  width: 22px;
+  height: 22px;
+}
+.fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(30, 58, 138, 0.5), 0 4px 8px rgba(0,0,0,0.18);
+}
+.fab:active {
+  transform: translateY(0) scale(0.96);
+}
+.fab.armed {
+  background: var(--positive);
+  box-shadow: 0 8px 20px rgba(21, 128, 61, 0.45), 0 2px 6px rgba(0,0,0,0.15);
+}
+.fab.armed:hover {
+  box-shadow: 0 12px 28px rgba(21, 128, 61, 0.55), 0 4px 8px rgba(0,0,0,0.18);
+}
+.fab:disabled {
+  background: var(--text-muted);
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+.fab-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: fab-spin 0.7s linear infinite;
+}
+@keyframes fab-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* === Apple-Style Map-Controls (rechts oben, segmentierter Stack) === */
+#map-controls.control-stack {
+  position: absolute;
+  top: 12px;
+  top: max(12px, env(safe-area-inset-top, 12px));
+  right: 12px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0,0,0,0.08);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+}
+body.theme-night #map-controls.control-stack {
+  background: rgba(20, 26, 38, 0.85);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.ctrl-btn {
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  padding: 0;
+  position: relative;
+  transition: background 0.15s ease;
+}
+.ctrl-btn svg {
+  width: 19px;
+  height: 19px;
+}
+.ctrl-btn + .ctrl-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 6px;
+  height: 1px;
+  background: var(--border);
+}
+.ctrl-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+body.theme-night .ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.ctrl-btn:active {
+  background: rgba(0, 0, 0, 0.08);
+  transform: scale(0.95);
+}
+body.theme-night .ctrl-btn:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+.ctrl-btn.active {
+  color: var(--accent);
+}
+
+/* === Status-Pille (unten links über der Karte) === */
+#fly-status.pill {
+  position: absolute;
+  top: 12px;
+  top: max(12px, env(safe-area-inset-top, 12px));
+  left: 12px;
+  z-index: 500;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  padding: 6px 12px 6px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.01em;
+}
+body.theme-night #fly-status.pill {
+  background: rgba(20, 26, 38, 0.85);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.2);
+}
+#fly-status .status-dot {
+  width: 7px; height: 7px;
+}
+
+/* === Modals === */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-backdrop[hidden] { display: none; }
+
+.modal {
+  background: var(--bg-panel);
+  border-radius: 14px;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+.form-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  display: block;
+}
+.form-input, .form-select {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 17px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: inherit;
+  min-height: 48px;
+}
+.form-input:focus, .form-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+}
+.form-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* === PDF-Import-Vorschau === */
+.modal.modal-wide {
+  max-width: 580px;
+}
+
+.import-preview {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 50vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.import-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.import-row:last-child { border-bottom: none; }
+.import-row.invalid {
+  background: rgba(185, 28, 28, 0.06);
+}
+.import-row input[type="checkbox"] {
+  margin-top: 3px;
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.import-row-body {
+  flex: 1;
+  min-width: 0;
+}
+.import-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.import-row-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 6px;
+  font-feature-settings: 'tnum' 1;
+}
+.import-row.invalid .import-row-num {
+  background: var(--negative);
+}
+.import-row-type {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+.import-row-coords {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-feature-settings: 'tnum' 1;
+}
+.import-row-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.import-row-error {
+  font-size: 12px;
+  color: var(--negative);
+  margin-top: 4px;
+}
+
+.modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-btn {
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  min-height: 46px;
+}
+.modal-btn.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.modal-btn.danger {
+  background: var(--negative);
+  color: white;
+  border-color: var(--negative);
+}
+.modal-btn.secondary {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+/* === Toast === */
+#toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.92);
+  color: white;
+  padding: 12px 18px;
+  border-radius: 24px;
+  font-size: 14px;
+  z-index: 2000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  max-width: 80vw;
+  text-align: center;
+}
+#toast.show { opacity: 1; }
+
+/* === Loading-Overlay === */
+#loading {
+  position: fixed;
+  inset: 0;
+  background: rgba(255,255,255,0.85);
+  z-index: 1500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+}
+body.theme-night #loading {
+  background: rgba(10, 14, 22, 0.85);
+}
+#loading.show { display: flex; }
+.spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* === Leaflet-Marker-Customizing === */
+.task-marker {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid white;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+.task-marker.active {
+  background: var(--target-active);
+  width: 38px; height: 38px;
+  font-size: 15px;
+}
+
+.gps-marker {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  border: 3px solid white;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 2px 6px rgba(0,0,0,0.3);
+  position: relative;
+}
+.gps-marker::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.25);
+  animation: ping 2s ease-out infinite;
+}
+@keyframes ping {
+  0% { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.trajectory-time-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--trajectory);
+  border: 2px solid var(--bg-app);
+  box-shadow: 0 0 0 1px var(--trajectory), 0 1px 2px rgba(0,0,0,0.25);
+}
+/* 60-min Marker leicht hervorheben (Endpunkt) */
+.trajectory-time-marker.endpoint {
+  width: 12px;
+  height: 12px;
+}
+
+/* iPad-Optimierung: größere Touch-Targets für Cockpit-Nutzung */
+@media (min-width: 768px) and (min-height: 900px) {
+  .data-value { font-size: 28px; }
+  .data-cell { min-height: 64px; padding: 6px 12px 8px 12px; }
+  .data-label { font-size: 11px; }
+  .data-unit { font-size: 12px; }
+  .data-sub { font-size: 14px; }
+  .task-icon-btn { width: 44px; height: 44px; }
+  .task-icon-btn svg { width: 24px; height: 24px; }
+  .task-num { width: 36px; height: 36px; font-size: 15px; }
+  .task-target { font-size: 16px; }
+  .task-meta { font-size: 12px; }
+  .task-distance { font-size: 14px; }
+  .task-row { min-height: 56px; padding: 12px 14px; gap: 12px; }
+}
+
+/* iPad Querformat: Konsole-Zeile großzügiger für Cockpit */
+@media (orientation: landscape) and (min-width: 1024px) {
+  #console { max-height: 34vh; }
+  .data-value { font-size: 30px; }
+  .data-cell { min-height: 68px; padding: 7px 14px 9px 14px; }
+  .data-label { font-size: 11px; }
+  .data-unit { font-size: 12px; }
+  .data-sub { font-size: 15px; }
+  .task-icon-btn { width: 46px; height: 46px; }
+  .task-icon-btn svg { width: 26px; height: 26px; }
+}
+
+/* Safe-Area für iPhone X+ */
+.console-header { padding-top: max(6px, env(safe-area-inset-top, 6px)); }
+
+/* Leaflet Popup Customizing */
+.leaflet-popup-content-wrapper {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-radius: 10px;
+}
+.leaflet-popup-tip {
+  background: var(--bg-panel);
+}
+.leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.leaflet-popup-content h4 {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.leaflet-popup-content .popup-row {
+  margin: 4px 0;
+}
+.leaflet-popup-content .popup-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+.popup-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.popup-btn.danger {
+  background: var(--negative);
+}
+
+</style>
+</head>
+<body class="theme-day">
+
+<div id="app">
+  <!-- Karten-Bereich -->
+  <div class="map-wrap">
+    <div id="map"></div>
+
+    <!-- Apple-Style Map-Controls (rechts oben, segmented stack) -->
+    <div id="map-controls" class="control-stack">
+      <button class="ctrl-btn" id="btn-pick-target" aria-label="Target auf Karte setzen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+          <circle cx="12" cy="10" r="3"/>
+        </svg>
+      </button>
+      <button class="ctrl-btn" id="btn-recenter" aria-label="Auf eigene Position zentrieren">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+        </svg>
+      </button>
+      <button class="ctrl-btn" id="btn-basemap" aria-label="Karte umschalten">
+        <!-- Layers icon, Apple-style -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 22 8 12 14 2 8 12 2"/>
+          <polyline points="2 14 12 20 22 14"/>
+        </svg>
+      </button>
+      <button class="ctrl-btn" id="btn-theme" aria-label="Tag/Nacht">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <button class="ctrl-btn" id="btn-update" aria-label="App-Update">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Status-Pille (rechts oben unter den Map-Controls auf Mobile, Tablet daneben) -->
+    <div id="fly-status" class="pill">
+      <span class="status-dot" id="fly-dot"></span>
+      <span id="fly-text">Bereit</span>
+    </div>
+  </div>
+
+  <!-- Floating Action Button: schwebt am Übergang Karte/Konsole, klein und elegant -->
+  <button class="fab" id="btn-fly" aria-label="Fly · Wetter laden">
+    <svg id="fab-fly-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <polygon points="6 4 20 12 6 20 6 4"/>
+    </svg>
+  </button>
+
+  <!-- Konsole -->
+  <div id="console">
+    <div class="console-header">
+      <div class="console-title-wrap">
+        <span class="console-title">Kompass</span>
+        <span class="status-bar-inline">
+          <span class="status-dot" id="gps-dot"></span>
+          <span id="gps-status-text">GPS sucht …</span>
+        </span>
+      </div>
+      <div class="console-actions">
+        <button class="icon-btn" id="btn-settings" aria-label="Einstellungen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Live-Daten -->
+    <div class="data-grid">
+      <div class="data-cell" id="cell-track">
+        <div class="data-label">Track</div>
+        <div class="data-value" id="val-track">—</div>
+      </div>
+      <div class="data-cell" id="cell-speed">
+        <div class="data-label">Speed</div>
+        <div class="data-value"><span id="val-speed">—</span><span class="data-unit">km/h</span></div>
+      </div>
+      <div class="data-cell" id="cell-msl">
+        <div class="data-label">Höhe</div>
+        <div class="data-value"><span id="val-msl">—</span><span class="data-unit">ft MSL</span></div>
+        <div class="data-sub"><span id="val-agl">—</span><span class="data-unit">m AGL</span></div>
+      </div>
+      <div class="data-cell" id="cell-vsi">
+        <div class="data-label">VSI</div>
+        <div class="data-value"><span id="val-vsi">—</span><span class="data-unit">m/s</span></div>
+      </div>
+    </div>
+
+    <!-- Target-Profil -->
+    <div class="target-panel empty" id="target-panel">
+      Tippe auf einen Task, um Profil-Empfehlung zu zeigen.
+    </div>
+
+    <!-- Tasks-Liste -->
+    <div class="tasks-section">
+      <div class="tasks-header">
+        <div class="tasks-title">Tasks <span class="tasks-count-badge" id="tasks-count">0</span></div>
+        <div class="tasks-header-actions">
+          <button class="task-icon-btn" id="btn-import-pdf" aria-label="Tasksheet (PDF) importieren">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="12" y1="18" x2="12" y2="12"/>
+              <polyline points="9 15 12 12 15 15"/>
+            </svg>
+          </button>
+          <button class="task-icon-btn primary" id="btn-add-task" aria-label="Task hinzufügen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="tasks-list">
+        <div class="task-empty">Noch keine Tasks. Tippe auf „+", um zu starten.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Task hinzufügen/bearbeiten -->
+<div class="modal-backdrop" id="modal-task" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-task-title">Task hinzufügen</div>
+      <button class="modal-close" data-close="modal-task">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="task-num">Task-Nummer</label>
+        <input class="form-input" id="task-num" type="number" min="1" max="20" value="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="task-type">Task-Typ</label>
+        <select class="form-select" id="task-type">
+          <option value="PDG">PDG · Pilot Declared Goal</option>
+          <option value="JDG">JDG · Judge Declared Goal</option>
+          <option value="HWZ">HWZ · Hesitation Waltz</option>
+          <option value="FIN">FIN · Fly In</option>
+          <option value="FON">FON · Fly On</option>
+          <option value="MDD">MDD · Minimum Distance Double Drop</option>
+          <option value="ELB">ELB · Elbow</option>
+          <option value="LRN">LRN · Land Run</option>
+          <option value="WSD">WSD · Watership Down</option>
+          <option value="GBM">GBM · Gordon Bennett Memorial</option>
+          <option value="CRT">CRT · Calculated Rate of Approach</option>
+          <option value="OTHER">Andere</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="task-utm">Target (UTM-Kurzform · 4+4 Ziffern)</label>
+        <input class="form-input" id="task-utm" type="text" inputmode="numeric" placeholder="z.B. 7865 7734" pattern="[0-9 ]*">
+        <div class="form-hint">Format wie auf DMV-Tasksheet: zwei Vier-Ziffer-Blöcke (Easting Northing). Leerzeichen optional.</div>
+      </div>
+      <div class="form-group" style="display: flex; gap: 8px;">
+        <div style="flex: 1;">
+          <label class="form-label" for="task-start">Scoring von</label>
+          <input class="form-input" id="task-start" type="time">
+        </div>
+        <div style="flex: 1;">
+          <label class="form-label" for="task-end">Scoring bis</label>
+          <input class="form-input" id="task-end" type="time">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="task-notes">Notiz (optional)</label>
+        <input class="form-input" id="task-notes" type="text">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn danger" id="task-delete-btn" hidden>Löschen</button>
+      <button class="modal-btn secondary" data-close="modal-task">Abbrechen</button>
+      <button class="modal-btn primary" id="task-save-btn">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Wettbewerbs-Setup -->
+<div class="modal-backdrop" id="modal-setup" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Wettbewerbs-Setup</div>
+      <button class="modal-close" data-close="modal-setup">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="comp-name">Wettbewerbs-Name (optional)</label>
+        <input class="form-input" id="comp-name" type="text" placeholder="z.B. Warsteiner Cup 2026">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="comp-zone">UTM-Zone</label>
+        <select class="form-select" id="comp-zone">
+          <option value="32U">32U · Deutschland West (Hessen, Bayern West, NRW, etc.)</option>
+          <option value="33U">33U · Deutschland Ost (Bayern Ost, Sachsen, Berlin, etc.)</option>
+          <option value="32T">32T · Süd-Bayern, Vorarlberg, Westschweiz</option>
+          <option value="33T">33T · Tirol, Italien Nord</option>
+          <option value="31U">31U · Niederlande, Belgien, Frankreich Nord</option>
+        </select>
+        <div class="form-hint">Bestimmt, wie die UTM-Kurzform-Targets aufgelöst werden.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Referenzpunkt (Zentrum des Wettbewerbsbereichs)</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <span id="comp-ref-display" style="flex:1; font-size: 13px; color: var(--text-secondary);">Nicht gesetzt</span>
+          <button class="modal-btn secondary" id="btn-ref-gps">📍 GPS</button>
+          <button class="modal-btn secondary" id="btn-ref-pick">🗺 Karte</button>
+        </div>
+        <div class="form-hint">Wird gebraucht, um die fehlenden höheren Stellen der UTM-Kurzform aufzulösen. Idealerweise das Briefing-Zentrum oder die Startwiese.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Daten</label>
+        <button class="modal-btn secondary" id="btn-clear-tasks" style="width: 100%;">Alle Tasks löschen</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn primary" data-close="modal-setup">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: PDF-Import-Vorschau -->
+<div class="modal-backdrop" id="modal-import" hidden>
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title">Tasks aus PDF importieren</div>
+      <button class="modal-close" data-close="modal-import">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-hint" id="import-summary" style="margin-bottom:10px;">…</div>
+      <div id="import-preview" class="import-preview"></div>
+      <div class="form-hint" style="margin-top:10px; line-height:1.5;">
+        Du kannst die Auswahl per Checkbox einschränken. Bei mehreren Targets pro Task (z.B. HWZ) wird der erste verwendet, weitere stehen in den Notizen — jeder Task bleibt manuell editierbar.
+      </div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;">
+      <button class="modal-btn secondary" data-close="modal-import">Abbrechen</button>
+      <div style="display:flex; gap:8px;">
+        <button class="modal-btn secondary" id="btn-import-append">Anhängen</button>
+        <button class="modal-btn primary" id="btn-import-replace">Ersetzen</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast & Loading -->
+<div id="toast"></div>
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">Lade …</div>
+</div>
+
+<!-- Leaflet -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<!-- Verstecktes File-Input für PDF-Tasksheet-Import -->
+<input type="file" id="pdf-file-input" accept="application/pdf,.pdf" style="display:none">
+
+<script>
+// pdf.js Worker konfigurieren
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+/* ============================================================
+   KOMPASS — Wettbewerbs-Cockpit für Heißluftballone
+   Single-File-PWA, GPS-Live + Wetter-Trajektorie + Targets
+   ============================================================ */
+/* ---------- State-Cluster ---------- */
+const appState = {
+  baseMap: 'topo',         // 'topo' | 'sat' | 'dark' | 'osm' (Fallback)
+  theme: 'day',            // 'day' | 'night'
+  flying: false,           // ist der "Fly"-Modus aktiv (Wetter geladen)?
+  activeTaskId: null,      // welcher Task ist aktuell ausgewählt für Profil?
+};
+
+const gpsState = {
+  watchId: null,
+  hasFix: false,
+  lastFix: null,           // { lat, lng, alt, speedMs, headingDeg, accuracy, ts }
+  altSamples: [],          // [{ alt, ts }] zur VSI-Glättung
+  speedSamples: [],
+  trackSamples: [],
+  smoothedAlt: null,
+  smoothedVsi: null,
+  smoothedSpeedKmh: null,
+  smoothedTrackDeg: null,
+  terrainElevM: null,      // wird einmal nach Fly-Start abgefragt
+};
+
+const weatherState = {
+  forecast: null,          // gecachte Open-Meteo-Antwort
+  fetchedAt: null,         // ms timestamp
+  fetchedLat: null,
+  fetchedLng: null,
+};
+
+const tasksState = {
+  tasks: [],               // [{ id, num, type, utmShort, lat, lng, scoringStart, scoringEnd, notes }]
+  nextId: 1,
+};
+
+const compState = {
+  name: '',
+  utmZone: '32U',
+  refLat: null,
+  refLng: null,
+  pickingRefOnMap: false,
+  pickingTargetOnMap: false,    // 'new' | 'relocate-{id}' | false
+};
+
+/* ---------- Konstanten ---------- */
+const STORAGE_KEY = 'kompass_v1_state';
+const VERT_RATE_MS = 2;       // Standard-Steig-/Sinkrate für Profile
+const TRAJECTORY_DURATION_MIN = 60;
+const TRAJECTORY_STEP_MIN = 1;
+const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700];
+const DEFAULT_LOCATION = { lat: 50.2708, lng: 9.1067 }; // Büdingen als Fallback
+
+/* ============================================================
+   TEIL 1: GEOMETRIE & UTM
+   ============================================================ */
+
+const RAD = Math.PI / 180;
+const DEG = 180 / Math.PI;
+
+function destination(lat, lon, bearingDeg, distanceM) {
+  const R = 6371000;
+  const br = bearingDeg * RAD;
+  const φ1 = lat * RAD;
+  const λ1 = lon * RAD;
+  const dr = distanceM / R;
+  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(dr) + Math.cos(φ1)*Math.sin(dr)*Math.cos(br));
+  const λ2 = λ1 + Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(φ1), Math.cos(dr) - Math.sin(φ1)*Math.sin(φ2));
+  return [φ2 * DEG, ((λ2 * DEG) + 540) % 360 - 180];
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * RAD;
+  const dLon = (lon2 - lon1) * RAD;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*RAD)*Math.cos(lat2*RAD)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const φ1 = lat1 * RAD, φ2 = lat2 * RAD;
+  const Δλ = (lon2 - lon1) * RAD;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (Math.atan2(y, x) * DEG + 360) % 360;
+}
+
+function compassPoint(deg) {
+  const dirs = ['N','NO','O','SO','S','SW','W','NW'];
+  return dirs[Math.round(((deg % 360) / 45)) % 8];
+}
+
+/* ---------- UTM ↔ WGS84 ----------
+   Implementierung nach Karney/Snyder; ausreichend genau für
+   Wettbewerbsbereiche (Fehler < 1m für Strecken < 100km).
+*/
+const UTM_K0 = 0.9996;
+const UTM_A = 6378137;
+const UTM_F = 1 / 298.257223563;
+const UTM_E2 = UTM_F * (2 - UTM_F);
+const UTM_EP2 = UTM_E2 / (1 - UTM_E2);
+
+function zoneNumberFromString(z) {
+  // z.B. "32U" -> 32
+  return parseInt(z.replace(/[^0-9]/g, ''), 10);
+}
+function zoneIsNorth(z) {
+  // Bands ab N (>= "N") sind nördliche Hemisphäre
+  const letter = z.replace(/[^A-Z]/gi, '').toUpperCase();
+  return letter >= 'N';
+}
+
+function latLngToUtm(lat, lng, zoneStr) {
+  const zone = zoneNumberFromString(zoneStr);
+  const lng0 = (zone - 1) * 6 - 180 + 3;
+  const φ = lat * RAD;
+  const λ = lng * RAD;
+  const λ0 = lng0 * RAD;
+  const N = UTM_A / Math.sqrt(1 - UTM_E2 * Math.sin(φ)**2);
+  const T = Math.tan(φ)**2;
+  const C = UTM_EP2 * Math.cos(φ)**2;
+  const A = Math.cos(φ) * (λ - λ0);
+  const M = UTM_A * (
+    (1 - UTM_E2/4 - 3*UTM_E2**2/64 - 5*UTM_E2**3/256) * φ
+    - (3*UTM_E2/8 + 3*UTM_E2**2/32 + 45*UTM_E2**3/1024) * Math.sin(2*φ)
+    + (15*UTM_E2**2/256 + 45*UTM_E2**3/1024) * Math.sin(4*φ)
+    - (35*UTM_E2**3/3072) * Math.sin(6*φ)
+  );
+  const easting = UTM_K0 * N * (A + (1-T+C)*A**3/6 + (5-18*T+T**2+72*C-58*UTM_EP2)*A**5/120) + 500000;
+  let northing = UTM_K0 * (M + N*Math.tan(φ)*(A**2/2 + (5-T+9*C+4*C**2)*A**4/24 + (61-58*T+T**2+600*C-330*UTM_EP2)*A**6/720));
+  if (lat < 0) northing += 10000000;
+  return { easting, northing, zone };
+}
+
+function utmToLatLng(easting, northing, zoneStr) {
+  const zone = zoneNumberFromString(zoneStr);
+  const isNorth = zoneIsNorth(zoneStr);
+  if (!isNorth) northing -= 10000000;
+  const lng0 = (zone - 1) * 6 - 180 + 3;
+  const x = easting - 500000;
+  const y = northing;
+  const M = y / UTM_K0;
+  const μ = M / (UTM_A * (1 - UTM_E2/4 - 3*UTM_E2**2/64 - 5*UTM_E2**3/256));
+  const e1 = (1 - Math.sqrt(1-UTM_E2)) / (1 + Math.sqrt(1-UTM_E2));
+  const φ1 = μ + (3*e1/2 - 27*e1**3/32)*Math.sin(2*μ) + (21*e1**2/16 - 55*e1**4/32)*Math.sin(4*μ) + (151*e1**3/96)*Math.sin(6*μ);
+  const N1 = UTM_A / Math.sqrt(1 - UTM_E2 * Math.sin(φ1)**2);
+  const T1 = Math.tan(φ1)**2;
+  const C1 = UTM_EP2 * Math.cos(φ1)**2;
+  const R1 = UTM_A * (1 - UTM_E2) / Math.pow(1 - UTM_E2*Math.sin(φ1)**2, 1.5);
+  const D = x / (N1 * UTM_K0);
+  const lat = φ1 - (N1 * Math.tan(φ1) / R1) * (D**2/2 - (5+3*T1+10*C1-4*C1**2-9*UTM_EP2)*D**4/24 + (61+90*T1+298*C1+45*T1**2-252*UTM_EP2-3*C1**2)*D**6/720);
+  const lng = lng0*RAD + (D - (1+2*T1+C1)*D**3/6 + (5-2*C1+28*T1-3*C1**2+8*UTM_EP2+24*T1**2)*D**5/120) / Math.cos(φ1);
+  return { lat: lat * DEG, lng: lng * DEG };
+}
+
+/* ---------- UTM-Kurzform-Auflösung ---------- */
+function parseUtmShort(str) {
+  // "7865 7734" oder "78657734" -> [7865, 7734]
+  const digits = String(str || '').replace(/[^0-9]/g, '');
+  if (digits.length !== 8) return null;
+  return [parseInt(digits.substring(0, 4), 10), parseInt(digits.substring(4, 8), 10)];
+}
+
+function resolveUtmShort(utmShortStr, refLat, refLng, zoneStr) {
+  const parsed = parseUtmShort(utmShortStr);
+  if (!parsed) return { ok: false, error: 'UTM-Format ungültig (8 Ziffern erwartet, z.B. „7865 7734")' };
+  if (refLat == null || refLng == null) return { ok: false, error: 'Wettbewerbs-Referenzpunkt fehlt (in Setup ⚙️ setzen)' };
+
+  const [eShort, nShort] = parsed;  // eShort/nShort sind Ziffer 4-7 (10er-bis-10000er-Stelle)
+  // Tatsächliche Bedeutung in DMV-Tasksheets: Zehnerstelle bis Zehntausenderstelle.
+  // Beispiel: 7865 7734 = X..78650, X..77340 (in m)
+  const refUtm = latLngToUtm(refLat, refLng, zoneStr);
+
+  // Aus Referenz die letzten 5 Stellen ersetzen: [10000er..1er bleibt aus Eingabe, höhere Stellen aus Referenz]
+  // DMV-Konvention: 4-Ziffer-Block = (E mod 100000) / 10, also Genauigkeit auf 10m
+  function reconstructAxis(refValue, shortValue) {
+    const refRounded = Math.round(refValue);
+    const high = Math.floor(refRounded / 100000) * 100000;  // alle Stellen ab 100k
+    const candidate = high + shortValue * 10;
+    // Prüfe Nachbarn (Vorgänger / Nachfolger Hunderttausender), nimm den, der am nächsten an Referenz ist
+    const candidates = [candidate - 100000, candidate, candidate + 100000];
+    let best = candidates[0];
+    let bestDist = Math.abs(candidates[0] - refRounded);
+    for (let i = 1; i < candidates.length; i++) {
+      const d = Math.abs(candidates[i] - refRounded);
+      if (d < bestDist) { best = candidates[i]; bestDist = d; }
+    }
+    return best;
+  }
+  const easting = reconstructAxis(refUtm.easting, eShort);
+  const northing = reconstructAxis(refUtm.northing, nShort);
+
+  const { lat, lng } = utmToLatLng(easting, northing, zoneStr);
+  const dist = haversine(refLat, refLng, lat, lng);
+  if (dist > 80000) {
+    return { ok: false, error: `Aufgelöste Position ist ${(dist/1000).toFixed(0)} km vom Referenzpunkt entfernt — Zone oder Tippfehler?` };
+  }
+  return { ok: true, lat, lng, easting, northing, distFromRef: dist };
+}
+
+/* ============================================================
+   TEIL 2: STORAGE
+   ============================================================ */
+
+function saveState() {
+  try {
+    const payload = {
+      tasks: tasksState.tasks,
+      nextId: tasksState.nextId,
+      comp: { ...compState, pickingRefOnMap: false },
+      app: { theme: appState.theme, baseMap: appState.baseMap, activeTaskId: appState.activeTaskId },
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch (e) { console.warn('saveState fail', e); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data.tasks) tasksState.tasks = data.tasks;
+    if (data.nextId) tasksState.nextId = data.nextId;
+    if (data.comp) Object.assign(compState, data.comp);
+    if (data.app) {
+      appState.theme = data.app.theme || 'day';
+      appState.baseMap = data.app.baseMap || 'topo';
+      appState.activeTaskId = data.app.activeTaskId || null;
+    }
+  } catch (e) { console.warn('loadState fail', e); }
+}
+
+
+/* ============================================================
+   TEIL 3: WETTER (Open-Meteo / DWD ICON)
+   ============================================================ */
+
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function fetchWindForecast(lat, lng) {
+  // 6 Stunden vor und 8 Stunden nach jetzt — deckt Wettbewerbs-Briefing bis Spätflug
+  const now = new Date();
+  const from = new Date(now.getTime() - 1 * 3600 * 1000);
+  const to = new Date(now.getTime() + 8 * 3600 * 1000);
+  const params = new URLSearchParams({
+    latitude: lat.toFixed(4),
+    longitude: lng.toFixed(4),
+    start_date: localDateStr(from),
+    end_date: localDateStr(to),
+    timezone: 'auto',
+    models: 'icon_seamless',
+    hourly: [
+      'wind_speed_10m','wind_direction_10m',
+      'wind_speed_80m','wind_direction_80m',
+      'wind_speed_120m','wind_direction_120m',
+      'wind_speed_180m','wind_direction_180m',
+      ...PRESSURE_LEVELS.flatMap(p => [
+        `wind_speed_${p}hPa`,
+        `wind_direction_${p}hPa`,
+        `geopotential_height_${p}hPa`,
+      ])
+    ].join(','),
+  });
+  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Wetter-API HTTP ' + res.status);
+  return res.json();
+}
+
+async function fetchElevation(lat, lng) {
+  const url = `https://api.open-meteo.com/v1/elevation?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.elevation?.[0] ?? null;
+  } catch { return null; }
+}
+
+/* ---------- Wind-Sampling & Interpolation ---------- */
+function windSamplesForHour(forecast, hourIdx, terrainElevM) {
+  const samples = [];
+  const aglPairs = [[10,'10m'],[80,'80m'],[120,'120m'],[180,'180m']];
+  aglPairs.forEach(([h, suf]) => {
+    const sp = forecast.hourly[`wind_speed_${suf}`]?.[hourIdx];
+    const dr = forecast.hourly[`wind_direction_${suf}`]?.[hourIdx];
+    if (sp != null && dr != null) samples.push({ h, speed: sp, dirFrom: dr });
+  });
+  if (terrainElevM != null) {
+    PRESSURE_LEVELS.forEach(p => {
+      const sp = forecast.hourly[`wind_speed_${p}hPa`]?.[hourIdx];
+      const dr = forecast.hourly[`wind_direction_${p}hPa`]?.[hourIdx];
+      const gph = forecast.hourly[`geopotential_height_${p}hPa`]?.[hourIdx];
+      if (sp != null && dr != null && gph != null) {
+        const aglH = gph - terrainElevM;
+        if (aglH > 0 && aglH < 25000) samples.push({ h: aglH, speed: sp, dirFrom: dr });
+      }
+    });
+  }
+  samples.sort((a, b) => a.h - b.h);
+  return samples;
+}
+
+function interpolateWind(targetAglM, samples) {
+  if (!samples.length) return null;
+  if (targetAglM <= samples[0].h) return { speed: samples[0].speed, dirFrom: samples[0].dirFrom };
+  if (targetAglM >= samples[samples.length-1].h) {
+    const s = samples[samples.length-1];
+    return { speed: s.speed, dirFrom: s.dirFrom };
+  }
+  for (let i = 0; i < samples.length - 1; i++) {
+    const a = samples[i], b = samples[i+1];
+    if (targetAglM >= a.h && targetAglM <= b.h) {
+      const t = (targetAglM - a.h) / (b.h - a.h);
+      // Vektoriell interpolieren (sonst bei N-Wechsel falsch)
+      const ax = a.speed * Math.cos(a.dirFrom * RAD);
+      const ay = a.speed * Math.sin(a.dirFrom * RAD);
+      const bx = b.speed * Math.cos(b.dirFrom * RAD);
+      const by = b.speed * Math.sin(b.dirFrom * RAD);
+      const x = ax + (bx - ax) * t;
+      const y = ay + (by - ay) * t;
+      const speed = Math.sqrt(x*x + y*y);
+      const dirFrom = (Math.atan2(y, x) * DEG + 360) % 360;
+      return { speed, dirFrom };
+    }
+  }
+  return null;
+}
+
+function findHourIndex(forecast, targetDate) {
+  const times = forecast.hourly.time;
+  const targetISO = `${localDateStr(targetDate)}T${String(targetDate.getHours()).padStart(2,'0')}:00`;
+  const idx = times.indexOf(targetISO);
+  if (idx >= 0) return idx;
+  // Fallback: nächstgelegene Stunde
+  const targetMs = targetDate.getTime();
+  let bestIdx = 0, bestDiff = Infinity;
+  for (let i = 0; i < times.length; i++) {
+    const t = new Date(times[i]).getTime();
+    const d = Math.abs(t - targetMs);
+    if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+function interpolateWindTimeSpace(forecast, targetDate, aglM, terrainElevM) {
+  const times = forecast.hourly.time;
+  const targetMs = targetDate.getTime();
+  let lo = 0, hi = times.length - 1;
+  for (let i = 0; i < times.length - 1; i++) {
+    const t0 = new Date(times[i]).getTime();
+    const t1 = new Date(times[i+1]).getTime();
+    if (targetMs >= t0 && targetMs <= t1) { lo = i; hi = i+1; break; }
+  }
+  const t0 = new Date(times[lo]).getTime();
+  const t1 = new Date(times[hi]).getTime();
+  const tFrac = t1 === t0 ? 0 : (targetMs - t0) / (t1 - t0);
+  const w0 = interpolateWind(aglM, windSamplesForHour(forecast, lo, terrainElevM));
+  const w1 = interpolateWind(aglM, windSamplesForHour(forecast, hi, terrainElevM));
+  if (!w0 || !w1) return w0 || w1 || null;
+  const x0 = w0.speed * Math.cos(w0.dirFrom * RAD);
+  const y0 = w0.speed * Math.sin(w0.dirFrom * RAD);
+  const x1 = w1.speed * Math.cos(w1.dirFrom * RAD);
+  const y1 = w1.speed * Math.sin(w1.dirFrom * RAD);
+  const x = x0 + (x1 - x0) * tFrac;
+  const y = y0 + (y1 - y0) * tFrac;
+  const speed = Math.sqrt(x*x + y*y);
+  const dirFrom = (Math.atan2(y, x) * DEG + 360) % 360;
+  return { speed, dirFrom };
+}
+
+/* ============================================================
+   TEIL 4: TRAJEKTORIEN-BERECHNUNG
+   ============================================================ */
+
+function kmhToMs(v) { return v / 3.6; }
+function driftBearing(windDirFrom) { return (windDirFrom + 180) % 360; }
+
+function computeTrajectory(forecast, startDate, lat, lng, terrainElevM, cruiseAglM, durationMin, stepMin = 1) {
+  const path = [[lat, lng]];
+  const times = [startDate.getTime()];
+  let curLat = lat, curLng = lng;
+  for (let m = stepMin; m <= durationMin; m += stepMin) {
+    const t = new Date(startDate.getTime() + m * 60 * 1000);
+    const w = interpolateWindTimeSpace(forecast, t, cruiseAglM, terrainElevM);
+    if (!w) break;
+    const stepSec = stepMin * 60;
+    const distM = kmhToMs(w.speed) * stepSec;
+    [curLat, curLng] = destination(curLat, curLng, driftBearing(w.dirFrom), distM);
+    path.push([curLat, curLng]);
+    times.push(t.getTime());
+  }
+  return { path, times, cruiseAglM, startMs: startDate.getTime() };
+}
+
+function computeProfileTrajectory(forecast, startDate, lat, lng, terrainElevM, cruiseAglM, durationSec, climbRate = VERT_RATE_MS, descentRate = VERT_RATE_MS, startAglM = 0) {
+  // Vollprofil: Aufstieg von startAglM auf cruiseAglM, dann Cruise, dann Sinkflug auf 0.
+  // durationSec = Gesamtdauer. Wir simulieren in 30s-Schritten.
+  const climbTime = Math.max(0, (cruiseAglM - startAglM) / climbRate);
+  const descentTime = cruiseAglM / descentRate;
+  if (climbTime + descentTime > durationSec) return null;
+  const cruiseTime = durationSec - climbTime - descentTime;
+
+  const path = [[lat, lng]];
+  let curLat = lat, curLng = lng;
+  let t = 0;
+  const stepSec = 30;
+  let curAgl = startAglM;
+  while (t < durationSec) {
+    let phaseRate = 0;
+    if (t < climbTime) phaseRate = climbRate;
+    else if (t < climbTime + cruiseTime) phaseRate = 0;
+    else phaseRate = -descentRate;
+
+    curAgl += phaseRate * stepSec;
+    if (curAgl < 0) curAgl = 0;
+    const sampleAgl = Math.max(curAgl, 5);
+    const dt = new Date(startDate.getTime() + t * 1000);
+    const w = interpolateWindTimeSpace(forecast, dt, sampleAgl, terrainElevM);
+    if (w) {
+      const distM = kmhToMs(w.speed) * stepSec;
+      [curLat, curLng] = destination(curLat, curLng, driftBearing(w.dirFrom), distM);
+    }
+    path.push([curLat, curLng]);
+    t += stepSec;
+  }
+  return { path, endLat: curLat, endLng: curLng, cruiseAglM, climbTime, cruiseTime, descentTime };
+}
+
+/* Findet die Cruise-Höhe, deren Endpunkt am dichtesten an Target liegt.
+   Iteriert über Höhen 200..2500 m AGL in 50m-Schritten. */
+function findBestProfileToTarget(forecast, startDate, startLat, startLng, terrainElevM, targetLat, targetLng, durationSec) {
+  const candidates = [];
+  for (let h = 200; h <= 2500; h += 50) {
+    const profile = computeProfileTrajectory(forecast, startDate, startLat, startLng, terrainElevM, h, durationSec);
+    if (!profile) continue;
+    const dist = haversine(profile.endLat, profile.endLng, targetLat, targetLng);
+    candidates.push({ cruiseAglM: h, dist, profile });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => a.dist - b.dist);
+  return { best: candidates[0], all: candidates };
+}
+
+
+/* ============================================================
+   TEIL 5: KARTE & MARKER
+   ============================================================ */
+
+let map = null;
+const layers = {
+  base: null,
+  taskMarkers: new Map(),       // id -> L.Marker
+  gpsMarker: null,
+  trajectoryLine: null,
+  trajectoryTimeMarkers: [],
+  profileLine: null,
+  refMarker: null,
+};
+
+// Keyless Tile-Provider — keine API-Keys nötig, alle frei nutzbar
+const TILE_LAYERS = {
+  topo: {
+    // OpenTopoMap: Höhenlinien — perfekt für Ballonfahrer
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    options: {
+      maxZoom: 17,
+      subdomains: 'abc',
+      attribution: '© <a href="https://opentopomap.org/" target="_blank">OpenTopoMap</a> (CC-BY-SA) © <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM</a>'
+    }
+  },
+  sat: {
+    // ESRI World Imagery: hochauflösende Satellitenbilder, kostenlos
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    options: {
+      maxZoom: 19,
+      attribution: 'Tiles © Esri, Maxar, Earthstar Geographics'
+    }
+  },
+  dark: {
+    // CartoDB Dark Matter: stilvoller Dark-Mode, kostenlos
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    options: {
+      maxZoom: 20,
+      subdomains: 'abcd',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM</a> © <a href="https://carto.com/attributions" target="_blank">CARTO</a>'
+    }
+  },
+  osm: {
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    options: { maxZoom: 19, attribution: '© OpenStreetMap' }
+  }
+};
+
+function initMap() {
+  const center = compState.refLat && compState.refLng
+    ? [compState.refLat, compState.refLng]
+    : [DEFAULT_LOCATION.lat, DEFAULT_LOCATION.lng];
+  map = L.map('map', { zoomControl: false, attributionControl: true }).setView(center, 12);
+  L.control.zoom({ position: 'bottomleft' }).addTo(map);
+  applyBaseMap();
+
+  map.on('click', (e) => {
+    if (compState.pickingRefOnMap) {
+      compState.pickingRefOnMap = false;
+      setRefPoint(e.latlng.lat, e.latlng.lng);
+      hideToast();
+      showToast('Referenzpunkt gesetzt');
+      saveState();
+      reresolveAllTaskCoords();
+      renderTaskMarkers();
+      renderTaskList();
+      openModal('modal-setup');
+      updateMapPickCursor();
+      return;
+    }
+    if (compState.pickingTargetOnMap) {
+      const mode = compState.pickingTargetOnMap;
+      compState.pickingTargetOnMap = false;
+      hideToast();
+      handleTargetPicked(e.latlng.lat, e.latlng.lng, mode);
+      updateMapPickCursor();
+      return;
+    }
+  });
+}
+
+function applyBaseMap() {
+  if (layers.base) map.removeLayer(layers.base);
+  const cfg = TILE_LAYERS[appState.baseMap];
+  layers.base = L.tileLayer(cfg.url, cfg.options).addTo(map);
+}
+
+function divIcon(html, sizePx) {
+  return L.divIcon({
+    html,
+    className: 'custom-icon',
+    iconSize: [sizePx, sizePx],
+    iconAnchor: [sizePx/2, sizePx/2],
+  });
+}
+
+function renderTaskMarkers() {
+  // Alle alten Marker entfernen
+  layers.taskMarkers.forEach(m => map.removeLayer(m));
+  layers.taskMarkers.clear();
+
+  tasksState.tasks.forEach(t => {
+    if (t.lat == null || t.lng == null) return;
+    const isActive = appState.activeTaskId === t.id;
+    const cls = 'task-marker' + (isActive ? ' active' : '');
+    const html = `<div class="${cls}">${t.num}</div>`;
+    const m = L.marker([t.lat, t.lng], {
+      icon: divIcon(html, isActive ? 38 : 32),
+      keyboard: false,
+    }).addTo(map);
+    m.bindPopup(buildTaskPopupHtml(t));
+    m.on('popupopen', () => {
+      const content = m.getPopup().getElement();
+      content.querySelector('[data-popup-action="select"]')?.addEventListener('click', () => {
+        selectTask(t.id);
+        m.closePopup();
+      });
+      content.querySelector('[data-popup-action="edit"]')?.addEventListener('click', () => {
+        m.closePopup();
+        openTaskModal(t.id);
+      });
+    });
+    layers.taskMarkers.set(t.id, m);
+  });
+
+  renderRefMarker();
+}
+
+function buildTaskPopupHtml(t) {
+  const scoring = (t.scoringStart && t.scoringEnd) ? `<div class="popup-row">⏱ ${t.scoringStart} – ${t.scoringEnd}</div>` : '';
+  const notes = t.notes ? `<div class="popup-row">📝 ${escapeHtml(t.notes)}</div>` : '';
+  return `
+    <h4>Task ${t.num} · ${t.type}</h4>
+    <div class="popup-row">📍 ${escapeHtml(t.utmShort)}</div>
+    ${scoring}
+    ${notes}
+    <div class="popup-actions">
+      <button class="popup-btn" data-popup-action="select">Profil berechnen</button>
+      <button class="popup-btn" data-popup-action="edit">Bearbeiten</button>
+    </div>
+  `;
+}
+
+function renderRefMarker() {
+  if (layers.refMarker) {
+    map.removeLayer(layers.refMarker);
+    layers.refMarker = null;
+  }
+  if (compState.refLat == null || compState.refLng == null) return;
+  layers.refMarker = L.circleMarker([compState.refLat, compState.refLng], {
+    radius: 6,
+    color: '#0f172a',
+    fillColor: '#fbbf24',
+    fillOpacity: 0.9,
+    weight: 2,
+  }).addTo(map).bindTooltip('Wettbewerbs-Referenz', { direction: 'top' });
+}
+
+function renderGpsMarker() {
+  if (!gpsState.hasFix) {
+    if (layers.gpsMarker) {
+      map.removeLayer(layers.gpsMarker);
+      layers.gpsMarker = null;
+    }
+    return;
+  }
+  const { lat, lng } = gpsState.lastFix;
+  if (!layers.gpsMarker) {
+    layers.gpsMarker = L.marker([lat, lng], {
+      icon: divIcon('<div class="gps-marker"></div>', 18),
+      zIndexOffset: 800,
+    }).addTo(map);
+  } else {
+    layers.gpsMarker.setLatLng([lat, lng]);
+  }
+}
+
+function renderTrajectoryLine(traj) {
+  // Alte Linie und Marker entfernen
+  if (layers.trajectoryLine) { map.removeLayer(layers.trajectoryLine); layers.trajectoryLine = null; }
+  layers.trajectoryTimeMarkers.forEach(m => map.removeLayer(m));
+  layers.trajectoryTimeMarkers = [];
+
+  if (!traj || !traj.path || traj.path.length < 2) return;
+
+  layers.trajectoryLine = L.polyline(traj.path, {
+    color: getCssVar('--trajectory'),
+    weight: 4,
+    opacity: 0.85,
+    dashArray: null,
+  }).addTo(map);
+
+  // 15-Min-Marker (kleine Punkte, ohne Text — Pilot kennt die Sequenz 15/30/45/60)
+  for (let m = 15; m <= 60; m += 15) {
+    const idx = Math.min(m, traj.path.length - 1);
+    if (idx < traj.path.length) {
+      const point = traj.path[idx];
+      const isEndpoint = m === 60;
+      const marker = L.marker(point, {
+        icon: L.divIcon({
+          html: `<div class="trajectory-time-marker${isEndpoint ? ' endpoint' : ''}"></div>`,
+          className: 'time-marker-wrap',
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+        }),
+        keyboard: false,
+        interactive: false,
+      }).addTo(map);
+      layers.trajectoryTimeMarkers.push(marker);
+    }
+  }
+}
+
+function renderProfileLine(profile) {
+  if (layers.profileLine) { map.removeLayer(layers.profileLine); layers.profileLine = null; }
+  if (!profile || !profile.path || profile.path.length < 2) return;
+  layers.profileLine = L.polyline(profile.path, {
+    color: getCssVar('--target-active'),
+    weight: 3.5,
+    opacity: 0.85,
+    dashArray: '8,6',
+  }).addTo(map);
+}
+
+function getCssVar(name) {
+  return getComputedStyle(document.body).getPropertyValue(name).trim();
+}
+
+function setRefPoint(lat, lng) {
+  compState.refLat = lat;
+  compState.refLng = lng;
+  document.getElementById('comp-ref-display').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  renderRefMarker();
+}
+
+function reresolveAllTaskCoords() {
+  tasksState.tasks.forEach(t => {
+    const r = resolveUtmShort(t.utmShort, compState.refLat, compState.refLng, compState.utmZone);
+    if (r.ok) {
+      t.lat = r.lat;
+      t.lng = r.lng;
+    } else {
+      t.lat = null;
+      t.lng = null;
+    }
+  });
+  saveState();
+}
+
+
+/* ============================================================
+   TEIL 6: GPS-LIVE & GLÄTTUNG
+   ============================================================ */
+
+const GPS_SAMPLE_WINDOW = 5;     // Anzahl Samples für gleitenden Durchschnitt
+const VSI_SAMPLE_WINDOW_SEC = 8; // VSI über 8 Sekunden mitteln (mehr Glättung)
+const VSI_MAX_ACCURACY_M = 20;   // Höhensamples mit accuracy > 20m verwerfen (Indoor, schwacher Empfang)
+const VSI_DEADZONE_MS = 0.2;     // Werte unter ±0.2 m/s werden zu 0 (Rauschunterdrückung im Stand)
+const VSI_SPIKE_SIGMA = 2.5;     // Ausreißer-Schwelle: > 2,5 σ vom Median
+const VSI_MOTION_GATE_MS = 1.0;  // < 1,0 m/s GPS-Speed = stillstehend, VSI = 0 (höher gezogen wegen GPS-Speed-Rauschen)
+const VSI_PHYSICAL_MAX_MS = 6.0; // Mehr als ±6 m/s ist im Ballon physikalisch unrealistisch — als Spike verwerfen
+
+function startGps() {
+  if (!navigator.geolocation) {
+    setGpsStatus('err', 'GPS nicht verfügbar');
+    return;
+  }
+  if (gpsState.watchId != null) return;
+  setGpsStatus('warn', 'GPS sucht …', true);
+  gpsState.watchId = navigator.geolocation.watchPosition(
+    onGpsUpdate,
+    onGpsError,
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+  );
+}
+
+function stopGps() {
+  if (gpsState.watchId != null) {
+    navigator.geolocation.clearWatch(gpsState.watchId);
+    gpsState.watchId = null;
+  }
+}
+
+function onGpsError(err) {
+  console.warn('GPS error', err);
+  if (err.code === err.PERMISSION_DENIED) {
+    setGpsStatus('err', 'GPS-Berechtigung verweigert');
+  } else if (err.code === err.POSITION_UNAVAILABLE) {
+    setGpsStatus('err', 'GPS-Position nicht verfügbar');
+  } else {
+    setGpsStatus('warn', 'GPS-Fehler — neuer Versuch …');
+  }
+}
+
+function onGpsUpdate(pos) {
+  const c = pos.coords;
+  const ts = pos.timestamp || Date.now();
+  const fix = {
+    lat: c.latitude,
+    lng: c.longitude,
+    alt: c.altitude,        // m MSL (oder null)
+    speedMs: c.speed,       // m/s (oder null)
+    headingDeg: c.heading,  // ° (oder null/NaN bei Stand)
+    accuracy: c.accuracy,
+    ts,
+  };
+  gpsState.hasFix = true;
+  gpsState.lastFix = fix;
+
+  // Höhen-Glättung — nur Samples mit guter Genauigkeit für VSI verwenden
+  if (fix.alt != null && !isNaN(fix.alt)) {
+    const altAcc = c.altitudeAccuracy;
+    // Schicht 1: Genauigkeitsfilter — wenn altitudeAccuracy verfügbar und >20m, ignorieren
+    const accOk = (altAcc == null || isNaN(altAcc) || altAcc <= VSI_MAX_ACCURACY_M);
+    if (accOk) {
+      gpsState.altSamples.push({ alt: fix.alt, ts });
+      // Auf das letzte VSI_SAMPLE_WINDOW_SEC einschränken
+      const cutoff = ts - VSI_SAMPLE_WINDOW_SEC * 1000;
+      gpsState.altSamples = gpsState.altSamples.filter(s => s.ts >= cutoff);
+      // Geglätteter Wert: gleitender Durchschnitt der letzten N
+      const recent = gpsState.altSamples.slice(-GPS_SAMPLE_WINDOW);
+      gpsState.smoothedAlt = recent.reduce((s, x) => s + x.alt, 0) / recent.length;
+      // VSI: lineare Regression über alle Samples im Fenster (mit Spike-Filter)
+      if (gpsState.altSamples.length >= 4) {
+        const rawVsi = computeVsiRegression(gpsState.altSamples);
+        // Schicht 4: Motion-Gate — wenn das iPad praktisch stillsteht (< 1,0 m/s
+        // GPS-Speed über die letzten Samples), ist jede VSI-Anzeige Rauschen.
+        // Im Ballon hat man IMMER eine Speed > 1 m/s durch den Wind.
+        const recentSpeedMs = gpsState.speedSamples.length > 0
+          ? gpsState.speedSamples.reduce((s, v) => s + v, 0) / gpsState.speedSamples.length
+          : 0;
+        if (recentSpeedMs < VSI_MOTION_GATE_MS) {
+          gpsState.smoothedVsi = 0;
+        } else if (Math.abs(rawVsi) > VSI_PHYSICAL_MAX_MS) {
+          // Schicht 5: Spike-Reject — physikalisch unmöglicher VSI = GPS-Höhensprung
+          // letzten gültigen Wert beibehalten (oder 0, wenn noch keiner)
+          gpsState.smoothedVsi = gpsState.smoothedVsi ?? 0;
+        } else if (Math.abs(rawVsi) < VSI_DEADZONE_MS) {
+          // Schicht 6: Deadzone — kleine Werte zu 0 zwingen (Anzeige-Rauschen weg)
+          gpsState.smoothedVsi = 0;
+        } else {
+          gpsState.smoothedVsi = rawVsi;
+        }
+      }
+    }
+  }
+
+  // Speed-Glättung
+  if (fix.speedMs != null && !isNaN(fix.speedMs) && fix.speedMs >= 0) {
+    gpsState.speedSamples.push(fix.speedMs);
+    if (gpsState.speedSamples.length > GPS_SAMPLE_WINDOW) gpsState.speedSamples.shift();
+    const avgMs = gpsState.speedSamples.reduce((s, v) => s + v, 0) / gpsState.speedSamples.length;
+    gpsState.smoothedSpeedKmh = avgMs * 3.6;
+  } else if (gpsState.speedSamples.length === 0) {
+    gpsState.smoothedSpeedKmh = 0;
+  }
+
+  // Track-Glättung (vektoriell, sonst Sprung bei N-Wechsel)
+  if (fix.headingDeg != null && !isNaN(fix.headingDeg) && fix.speedMs > 0.5) {
+    gpsState.trackSamples.push(fix.headingDeg);
+    if (gpsState.trackSamples.length > GPS_SAMPLE_WINDOW) gpsState.trackSamples.shift();
+    const x = gpsState.trackSamples.reduce((s, v) => s + Math.cos(v * RAD), 0) / gpsState.trackSamples.length;
+    const y = gpsState.trackSamples.reduce((s, v) => s + Math.sin(v * RAD), 0) / gpsState.trackSamples.length;
+    gpsState.smoothedTrackDeg = (Math.atan2(y, x) * DEG + 360) % 360;
+  }
+
+  setGpsStatus('ok', `GPS OK · ±${Math.round(fix.accuracy)}m`);
+  renderGpsMarker();
+  updateConsoleData();
+
+  // Trajektorie alle paar Sekunden neu rechnen, nur wenn fliegend
+  maybeRecomputeTrajectory();
+}
+
+function computeVsiRegression(samples) {
+  // Schicht 2: Spike-Filter via Median Absolute Deviation (MAD)
+  // Ausreißer werfen die lineare Regression sonst aus dem Tritt
+  const n0 = samples.length;
+  if (n0 < 2) return 0;
+
+  const alts = samples.map(s => s.alt).slice().sort((a, b) => a - b);
+  const median = alts[Math.floor(alts.length / 2)];
+  const deviations = alts.map(a => Math.abs(a - median)).slice().sort((a, b) => a - b);
+  const mad = deviations[Math.floor(deviations.length / 2)] || 0.5;
+  // MAD → σ-Äquivalent, mit Mindesttoleranz 1,5m gegen zu strengen Filter
+  const threshold = Math.max(VSI_SPIKE_SIGMA * 1.4826 * mad, 1.5);
+
+  const cleaned = samples.filter(s => Math.abs(s.alt - median) <= threshold);
+  if (cleaned.length < 2) return 0;
+
+  // Lineare Regression alt = a*t + b, gibt a (m/s) zurück
+  const n = cleaned.length;
+  const t0 = cleaned[0].ts;
+  let sumT = 0, sumA = 0, sumTT = 0, sumTA = 0;
+  for (const s of cleaned) {
+    const t = (s.ts - t0) / 1000;
+    sumT += t;
+    sumA += s.alt;
+    sumTT += t * t;
+    sumTA += t * s.alt;
+  }
+  const denom = n * sumTT - sumT * sumT;
+  if (Math.abs(denom) < 1e-6) return 0;
+  const vsi = (n * sumTA - sumT * sumA) / denom;
+
+  // Schicht 3: Totzone — Werte im Rausch-Bereich auf 0 setzen
+  if (Math.abs(vsi) < VSI_DEADZONE_MS) return 0;
+  return vsi;
+}
+
+function setGpsStatus(level, text, pulsing = false) {
+  const dot = document.getElementById('gps-dot');
+  const txt = document.getElementById('gps-status-text');
+  dot.classList.remove('ok', 'warn', 'err', 'pulsing');
+  dot.classList.add(level);
+  if (pulsing) dot.classList.add('pulsing');
+  txt.textContent = text;
+}
+
+let lastTrajectoryComputeTs = 0;
+let lastTrajectoryAltCheck = null;
+function maybeRecomputeTrajectory() {
+  if (!appState.flying || !weatherState.forecast || !gpsState.hasFix) return;
+  const now = Date.now();
+  // Mindest-Interval: 5s
+  if (now - lastTrajectoryComputeTs < 5000) {
+    // Außer Höhe hat sich um > 30m geändert
+    if (lastTrajectoryAltCheck != null && gpsState.smoothedAlt != null) {
+      if (Math.abs(gpsState.smoothedAlt - lastTrajectoryAltCheck) < 30) return;
+    } else {
+      return;
+    }
+  }
+  lastTrajectoryComputeTs = now;
+  lastTrajectoryAltCheck = gpsState.smoothedAlt;
+  recomputeTrajectoryNow();
+}
+
+function recomputeTrajectoryNow() {
+  if (!weatherState.forecast || !gpsState.hasFix) return;
+  const { lat, lng } = gpsState.lastFix;
+  const altMsl = gpsState.smoothedAlt ?? gpsState.lastFix.alt ?? 0;
+  const terrain = gpsState.terrainElevM ?? 0;
+  const aglM = Math.max(10, altMsl - terrain);
+  const traj = computeTrajectory(weatherState.forecast, new Date(), lat, lng, terrain, aglM, TRAJECTORY_DURATION_MIN, TRAJECTORY_STEP_MIN);
+  renderTrajectoryLine(traj);
+  // Wenn Target aktiv, Profil neu rechnen
+  if (appState.activeTaskId != null) {
+    recomputeActiveTargetProfile();
+  }
+}
+
+
+/* ============================================================
+   TEIL 7: KONSOLEN-RENDERING
+   ============================================================ */
+
+function updateConsoleData() {
+  const trackEl = document.getElementById('val-track');
+  const speedEl = document.getElementById('val-speed');
+  const mslEl = document.getElementById('val-msl');
+  const aglEl = document.getElementById('val-agl');
+  const vsiEl = document.getElementById('val-vsi');
+  const cellVsi = document.getElementById('cell-vsi');
+  const cellTrack = document.getElementById('cell-track');
+
+  if (!gpsState.hasFix) {
+    trackEl.textContent = '—';
+    speedEl.textContent = '—';
+    mslEl.textContent = '—';
+    if (aglEl) aglEl.textContent = '—';
+    vsiEl.textContent = '—';
+    cellVsi.classList.remove('positive', 'negative');
+    return;
+  }
+
+  // Track
+  if (gpsState.smoothedTrackDeg != null) {
+    trackEl.textContent = `${Math.round(gpsState.smoothedTrackDeg).toString().padStart(3, '0')}°`;
+  } else if (gpsState.smoothedSpeedKmh != null && gpsState.smoothedSpeedKmh < 0.5) {
+    trackEl.textContent = '–––';
+  } else {
+    trackEl.textContent = '—';
+  }
+
+  // Speed
+  if (gpsState.smoothedSpeedKmh != null) {
+    speedEl.textContent = gpsState.smoothedSpeedKmh.toFixed(1);
+  } else {
+    speedEl.textContent = '—';
+  }
+
+  // Höhe — dual: ft MSL groß, m AGL klein
+  if (gpsState.smoothedAlt != null) {
+    const mslM = gpsState.smoothedAlt;
+    const mslFt = mslM * 3.28084;
+    mslEl.textContent = Math.round(mslFt).toLocaleString('de-DE');
+    if (aglEl) {
+      const terrain = gpsState.terrainElevM;
+      if (terrain != null) {
+        const aglM = Math.max(0, mslM - terrain);
+        aglEl.textContent = Math.round(aglM);
+      } else {
+        aglEl.textContent = '—';
+      }
+    }
+  } else {
+    mslEl.textContent = '—';
+    if (aglEl) aglEl.textContent = '—';
+  }
+
+  // VSI
+  if (gpsState.smoothedVsi != null) {
+    const v = gpsState.smoothedVsi;
+    vsiEl.textContent = (v >= 0 ? '+' : '') + v.toFixed(1);
+    cellVsi.classList.remove('positive', 'negative');
+    if (v > 0.3) cellVsi.classList.add('positive');
+    else if (v < -0.3) cellVsi.classList.add('negative');
+  } else {
+    vsiEl.textContent = '—';
+    cellVsi.classList.remove('positive', 'negative');
+  }
+}
+
+function renderTaskList() {
+  const listEl = document.getElementById('tasks-list');
+  const countEl = document.getElementById('tasks-count');
+  countEl.textContent = tasksState.tasks.length;
+
+  if (!tasksState.tasks.length) {
+    listEl.innerHTML = '<div class="task-empty">Noch keine Tasks. Tippe auf „+ Task", um zu starten.</div>';
+    return;
+  }
+
+  // Distanz zu jedem Task aus aktueller GPS-Position oder Ref-Punkt
+  const fromLat = gpsState.hasFix ? gpsState.lastFix.lat : compState.refLat;
+  const fromLng = gpsState.hasFix ? gpsState.lastFix.lng : compState.refLng;
+
+  // Nach Task-Nummer sortieren
+  const sorted = [...tasksState.tasks].sort((a, b) => a.num - b.num);
+  const html = sorted.map(t => {
+    const isActive = appState.activeTaskId === t.id;
+    let distHtml = '';
+    if (t.lat != null && fromLat != null) {
+      const d = haversine(fromLat, fromLng, t.lat, t.lng);
+      distHtml = `<div class="task-distance">${(d/1000).toFixed(1)} km</div>`;
+    } else if (t.lat == null) {
+      distHtml = `<div class="task-distance" style="color: var(--negative); font-size: 11px;">Ref fehlt</div>`;
+    }
+    const scoring = (t.scoringStart && t.scoringEnd) ? ` · ${t.scoringStart}–${t.scoringEnd}` : '';
+    return `
+      <div class="task-row ${isActive ? 'active' : ''}" data-task-id="${t.id}">
+        <div class="task-num">${t.num}</div>
+        <div class="task-info">
+          <div class="task-meta">${escapeHtml(t.type)}${escapeHtml(scoring)}</div>
+          <div class="task-target">${escapeHtml(t.utmShort)}</div>
+        </div>
+        ${distHtml}
+      </div>
+    `;
+  }).join('');
+  listEl.innerHTML = html;
+
+  // Click-Handler
+  listEl.querySelectorAll('.task-row').forEach(row => {
+    const id = parseInt(row.dataset.taskId, 10);
+    row.addEventListener('click', () => {
+      // Bei Doppel-Tap auf bereits aktiven: Bearbeiten öffnen
+      if (appState.activeTaskId === id) {
+        openTaskModal(id);
+      } else {
+        selectTask(id);
+      }
+    });
+  });
+}
+
+function renderTargetPanel() {
+  const panel = document.getElementById('target-panel');
+  const id = appState.activeTaskId;
+  if (id == null) {
+    panel.className = 'target-panel empty';
+    panel.innerHTML = 'Tippe auf einen Task, um Profil-Empfehlung zu zeigen.';
+    return;
+  }
+  const t = tasksState.tasks.find(x => x.id === id);
+  if (!t) return;
+  panel.className = 'target-panel';
+
+  const fromLat = gpsState.hasFix ? gpsState.lastFix.lat : compState.refLat;
+  const fromLng = gpsState.hasFix ? gpsState.lastFix.lng : compState.refLng;
+
+  let distStr = '—';
+  let bearStr = '';
+  if (t.lat != null && fromLat != null) {
+    const d = haversine(fromLat, fromLng, t.lat, t.lng);
+    distStr = `${(d/1000).toFixed(2)} km`;
+    const b = bearingDeg(fromLat, fromLng, t.lat, t.lng);
+    bearStr = ` · ${Math.round(b).toString().padStart(3, '0')}° (${compassPoint(b)})`;
+  }
+
+  let profileHtml = '';
+  let warnHtml = '';
+  const cached = activeTargetProfile;
+
+  if (!appState.flying) {
+    warnHtml = `<div class="target-warning">Profil-Berechnung erfordert geladene Wetterdaten — auf „▶ Fly" tippen.</div>`;
+  } else if (!gpsState.hasFix) {
+    warnHtml = `<div class="target-warning">Warte auf GPS-Fix für Profil-Berechnung …</div>`;
+  } else if (t.lat == null) {
+    warnHtml = `<div class="target-warning">Target-Koordinaten fehlen — Referenzpunkt im Setup setzen.</div>`;
+  } else if (cached) {
+    const c = cached;
+    profileHtml = `
+      <div class="target-profile-grid">
+        <div class="target-profile-cell">
+          <div class="target-profile-label">Reise-Höhe</div>
+          <div class="target-profile-value">${c.cruiseAglM} m</div>
+        </div>
+        <div class="target-profile-cell">
+          <div class="target-profile-label">Flugzeit</div>
+          <div class="target-profile-value">${Math.round(c.totalSec/60)} min</div>
+        </div>
+        <div class="target-profile-cell">
+          <div class="target-profile-label">Endpunkt-Δ</div>
+          <div class="target-profile-value">${c.endDistM < 1000 ? Math.round(c.endDistM) + ' m' : (c.endDistM/1000).toFixed(2) + ' km'}</div>
+        </div>
+      </div>
+    `;
+    if (c.endDistM > 500) {
+      warnHtml = `<div class="target-warning">Beste gefundene Höhe verfehlt das Target um ${Math.round(c.endDistM)} m. Wind passt aktuell nicht — anderes Target wählen oder Wartezeit nutzen.</div>`;
+    }
+  } else {
+    warnHtml = `<div class="target-warning">Berechne Profil …</div>`;
+  }
+
+  panel.innerHTML = `
+    <div class="target-header">
+      <div class="target-name">Task ${t.num} · ${escapeHtml(t.type)}</div>
+      <div class="target-distance">${distStr}${bearStr}</div>
+    </div>
+    ${profileHtml}
+    ${warnHtml}
+  `;
+}
+
+let activeTargetProfile = null;
+
+function recomputeActiveTargetProfile() {
+  activeTargetProfile = null;
+  const id = appState.activeTaskId;
+  if (id == null || !appState.flying || !weatherState.forecast || !gpsState.hasFix) {
+    renderTargetPanel();
+    renderProfileLine(null);
+    return;
+  }
+  const t = tasksState.tasks.find(x => x.id === id);
+  if (!t || t.lat == null) {
+    renderTargetPanel();
+    renderProfileLine(null);
+    return;
+  }
+
+  const { lat, lng } = gpsState.lastFix;
+  const altMsl = gpsState.smoothedAlt ?? gpsState.lastFix.alt ?? 0;
+  const terrain = gpsState.terrainElevM ?? 0;
+
+  // Schätze sinnvolle Flugzeit basierend auf Distanz und mittlerer Windgeschwindigkeit
+  const distM = haversine(lat, lng, t.lat, t.lng);
+  // Annahme: ~20 km/h mittlere Drift -> 5.5 m/s
+  const estDuration = Math.max(600, Math.min(3600, distM / 5.5));
+
+  const result = findBestProfileToTarget(weatherState.forecast, new Date(), lat, lng, terrain, t.lat, t.lng, estDuration);
+  if (result && result.best) {
+    activeTargetProfile = {
+      cruiseAglM: result.best.cruiseAglM,
+      totalSec: estDuration,
+      endDistM: result.best.dist,
+      profile: result.best.profile,
+    };
+    renderProfileLine(result.best.profile);
+  } else {
+    renderProfileLine(null);
+  }
+  renderTargetPanel();
+}
+
+function selectTask(id) {
+  if (appState.activeTaskId === id) {
+    // Bei nochmaligem Tap: deselektieren
+    appState.activeTaskId = null;
+  } else {
+    appState.activeTaskId = id;
+  }
+  saveState();
+  renderTaskMarkers();
+  renderTaskList();
+  if (appState.activeTaskId != null) {
+    recomputeActiveTargetProfile();
+    // Karte etwas auf das Target zoomen, falls nicht sichtbar
+    const t = tasksState.tasks.find(x => x.id === id);
+    if (t && t.lat != null && gpsState.hasFix) {
+      const bounds = L.latLngBounds([
+        [gpsState.lastFix.lat, gpsState.lastFix.lng],
+        [t.lat, t.lng],
+      ]);
+      map.fitBounds(bounds.pad(0.3), { animate: true, maxZoom: 14 });
+    }
+  } else {
+    activeTargetProfile = null;
+    renderProfileLine(null);
+    renderTargetPanel();
+  }
+}
+
+
+/* ============================================================
+   TEIL 8: TASK-MODAL & UI-STEUERUNG
+   ============================================================ */
+
+let editingTaskId = null;
+
+function openTaskModal(id = null) {
+  editingTaskId = id;
+  const isEdit = id != null;
+  const t = isEdit ? tasksState.tasks.find(x => x.id === id) : null;
+  document.getElementById('modal-task-title').textContent = isEdit ? `Task ${t.num} bearbeiten` : 'Task hinzufügen';
+  document.getElementById('task-num').value = isEdit ? t.num : nextTaskNumber();
+  document.getElementById('task-type').value = isEdit ? t.type : 'PDG';
+  document.getElementById('task-utm').value = isEdit ? t.utmShort : '';
+  document.getElementById('task-start').value = isEdit ? (t.scoringStart || '') : '';
+  document.getElementById('task-end').value = isEdit ? (t.scoringEnd || '') : '';
+  document.getElementById('task-notes').value = isEdit ? (t.notes || '') : '';
+  document.getElementById('task-delete-btn').hidden = !isEdit;
+  openModal('modal-task');
+  setTimeout(() => document.getElementById('task-utm').focus(), 50);
+}
+
+function nextTaskNumber() {
+  if (!tasksState.tasks.length) return 1;
+  const maxN = Math.max(...tasksState.tasks.map(t => t.num));
+  return maxN + 1;
+}
+
+function saveTaskFromModal() {
+  const num = parseInt(document.getElementById('task-num').value, 10);
+  const type = document.getElementById('task-type').value;
+  const utmShort = document.getElementById('task-utm').value.trim();
+  const scoringStart = document.getElementById('task-start').value;
+  const scoringEnd = document.getElementById('task-end').value;
+  const notes = document.getElementById('task-notes').value.trim();
+
+  if (!num || num < 1) { showToast('Ungültige Task-Nummer'); return; }
+  if (!utmShort) { showToast('UTM-Eingabe fehlt'); return; }
+
+  const resolved = resolveUtmShort(utmShort, compState.refLat, compState.refLng, compState.utmZone);
+  if (!resolved.ok && (compState.refLat == null)) {
+    showToast(resolved.error);
+    return;
+  }
+
+  let task;
+  if (editingTaskId != null) {
+    task = tasksState.tasks.find(x => x.id === editingTaskId);
+    if (!task) { closeModal('modal-task'); return; }
+    Object.assign(task, { num, type, utmShort, scoringStart, scoringEnd, notes });
+  } else {
+    task = {
+      id: tasksState.nextId++,
+      num, type, utmShort, scoringStart, scoringEnd, notes,
+      lat: null, lng: null,
+    };
+    tasksState.tasks.push(task);
+  }
+  if (resolved.ok) {
+    task.lat = resolved.lat;
+    task.lng = resolved.lng;
+  } else {
+    task.lat = null;
+    task.lng = null;
+  }
+
+  saveState();
+  closeModal('modal-task');
+  renderTaskMarkers();
+  renderTaskList();
+  if (appState.activeTaskId === task.id) {
+    recomputeActiveTargetProfile();
+  }
+  showToast(`Task ${task.num} gespeichert`);
+}
+
+function deleteTaskFromModal() {
+  if (editingTaskId == null) return;
+  if (!confirm('Diesen Task wirklich löschen?')) return;
+  tasksState.tasks = tasksState.tasks.filter(t => t.id !== editingTaskId);
+  if (appState.activeTaskId === editingTaskId) {
+    appState.activeTaskId = null;
+    activeTargetProfile = null;
+    renderProfileLine(null);
+  }
+  editingTaskId = null;
+  saveState();
+  closeModal('modal-task');
+  renderTaskMarkers();
+  renderTaskList();
+  renderTargetPanel();
+  showToast('Task gelöscht');
+}
+
+/* ---------- Modal-Helpers ---------- */
+function openModal(id) {
+  document.getElementById(id).hidden = false;
+}
+function closeModal(id) {
+  document.getElementById(id).hidden = true;
+}
+
+/* ---------- Toast / Loading ---------- */
+const ICON_PLAY = '<svg id="fab-fly-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
+const ICON_STOP = '<svg id="fab-fly-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>';
+const ICON_SPINNER = '<span class="fab-spinner" id="fab-fly-icon"></span>';
+
+let toastTimer = null;
+function showToast(msg, ms = 2400) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+function hideToast() {
+  document.getElementById('toast').classList.remove('show');
+  if (toastTimer) clearTimeout(toastTimer);
+}
+function showLoading(text = 'Lade …') {
+  document.getElementById('loading-text').textContent = text;
+  document.getElementById('loading').classList.add('show');
+  const btn = document.getElementById('btn-fly');
+  if (btn) btn.innerHTML = ICON_SPINNER;
+}
+function hideLoading() {
+  document.getElementById('loading').classList.remove('show');
+  const btn = document.getElementById('btn-fly');
+  if (btn) btn.innerHTML = appState.flying ? ICON_STOP : ICON_PLAY;
+}
+
+/* ---------- HTML-Escape ---------- */
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ============================================================
+   TEIL 8b: PDF-TASKSHEET-IMPORT
+   ============================================================ */
+
+// Bekannte Task-Typen aus FAI/CIA-Regelwerk (Rule 15.x).
+// Diese Liste deckt die Standard-Tasks bei deutschen/internationalen Wettbewerben ab.
+const KNOWN_TASK_TYPES = new Set([
+  'PDG','JDG','HWZ','FIN','FON','HNH','WSD','GBM','RTA','ELB',
+  'MDD','MDT','ANG','XDD','XDI','XDT','3DT','FLD','MAX','MIN','CRT','CRAT','SHA'
+]);
+
+let pendingImportTasks = [];   // [{ checked, num, type, utmShort, scoringStart, scoringEnd, notes, valid, error }]
+
+async function extractPdfText(file) {
+  // PDF in Text-Items pro Seite zerlegen, mit Y-Sortierung damit Zeilen erhalten bleiben.
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    // Items haben transform[5] = y, transform[4] = x
+    // Gleiche Y → eine Zeile (Toleranz 2pt)
+    const items = tc.items.map(it => ({
+      str: it.str,
+      x: it.transform[4],
+      y: it.transform[5],
+    })).filter(it => it.str && it.str.trim().length);
+    // Gruppieren nach Y (descending, weil PDF von unten nach oben zählt)
+    items.sort((a, b) => b.y - a.y || a.x - b.x);
+    let curY = null;
+    let curLine = [];
+    for (const it of items) {
+      if (curY === null || Math.abs(it.y - curY) <= 2) {
+        curLine.push(it);
+        curY = curY === null ? it.y : curY;
+      } else {
+        // Zeile abschließen
+        curLine.sort((a, b) => a.x - b.x);
+        lines.push(curLine.map(x => x.str).join(' ').replace(/\s+/g, ' ').trim());
+        curLine = [it];
+        curY = it.y;
+      }
+    }
+    if (curLine.length) {
+      curLine.sort((a, b) => a.x - b.x);
+      lines.push(curLine.map(x => x.str).join(' ').replace(/\s+/g, ' ').trim());
+    }
+  }
+  return lines.filter(l => l.length);
+}
+
+function parseTasksheetLines(lines) {
+  // Findet "Task NN TYP" Header und sammelt darauffolgende relevante Felder
+  // bis zum nächsten Task-Header oder Dateiende.
+  // Erkennt Koordinaten im Format "XXXX - YYYY" oder "XXXXYYYY" oder "XXXX YYYY".
+  const tasks = [];
+  let cur = null;
+  const taskHeaderRe = /\bTask\s+(\d{1,3})\s+([A-Z0-9]{2,5})\b/;
+  // Koordinaten: 4 Ziffern, Trenner (-, –, –, oder Whitespace), 4 Ziffern
+  const coordRe = /\b(\d{4})\s*[-–—]\s*(\d{4})\b/g;
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+/g, ' ').trim();
+    if (!line) continue;
+
+    const m = line.match(taskHeaderRe);
+    if (m) {
+      const type = m[2].toUpperCase();
+      // Plausibilität: Typ muss bekannter Task-Typ sein, sonst ignorieren
+      if (KNOWN_TASK_TYPES.has(type)) {
+        if (cur) tasks.push(cur);
+        cur = {
+          num: parseInt(m[1], 10),
+          type,
+          coords: [],         // [[E, N], ...]
+          markerColor: null,
+          markerDrop: null,
+          loggermarker: null,
+          scoringEnd: null,
+          rawLines: [line],
+        };
+        // Auch in der Header-Zeile schon nach Koordinaten suchen (falls inline)
+        let cm; coordRe.lastIndex = 0;
+        while ((cm = coordRe.exec(line)) !== null) {
+          cur.coords.push([cm[1], cm[2]]);
+        }
+        continue;
+      }
+    }
+
+    if (!cur) continue;
+    cur.rawLines.push(line);
+
+    // Koordinaten in Folge-Zeile?
+    let cm; coordRe.lastIndex = 0;
+    while ((cm = coordRe.exec(line)) !== null) {
+      cur.coords.push([cm[1], cm[2]]);
+    }
+
+    // Marker color
+    const colorMatch = line.match(/Marker\s+color\s+(.+?)(?:\s{2,}|$)/i);
+    if (colorMatch) cur.markerColor = colorMatch[1].trim();
+
+    // Marker drop
+    const dropMatch = line.match(/Marker\s+drop\s+(.+?)(?:\s{2,}|$)/i);
+    if (dropMatch) cur.markerDrop = dropMatch[1].trim();
+
+    // Loggermarker
+    const lmMatch = line.match(/Loggermarker\s+(\d+)/i);
+    if (lmMatch) cur.loggermarker = lmMatch[1];
+
+    // Scoring period ends at HH:MM (am|pm)?
+    const seMatch = line.match(/Scoring\s+period\s+ends\s+at\s+(\d{1,2}:\d{2})\s*(am|pm)?/i);
+    if (seMatch) {
+      let hhmm = seMatch[1];
+      const ap = (seMatch[2] || '').toLowerCase();
+      // Konvertiere 12h → 24h falls nötig
+      if (ap) {
+        let [h, m2] = hhmm.split(':').map(x => parseInt(x, 10));
+        if (ap === 'pm' && h < 12) h += 12;
+        if (ap === 'am' && h === 12) h = 0;
+        hhmm = String(h).padStart(2, '0') + ':' + String(m2).padStart(2, '0');
+      }
+      cur.scoringEnd = hhmm;
+    }
+  }
+  if (cur) tasks.push(cur);
+  return tasks;
+}
+
+function tasksheetToImportRows(parsedTasks) {
+  // Mappt Parser-Output auf Task-Rows wie sie die App erwartet.
+  // Bei mehreren Coords pro Task: erster wird utmShort, weitere → notes.
+  const rows = [];
+  for (const t of parsedTasks) {
+    let utmShort = null;
+    let extraTargets = '';
+    if (t.coords.length >= 1) {
+      utmShort = t.coords[0][0] + ' ' + t.coords[0][1];
+      if (t.coords.length > 1) {
+        extraTargets = t.coords.slice(1)
+          .map((c, i) => `Target ${String.fromCharCode(98 + i)}: ${c[0]}-${c[1]}`)
+          .join(' | ');
+      }
+    }
+
+    const notesParts = [];
+    if (t.markerColor) notesParts.push(`Marker: ${t.markerColor}`);
+    if (t.markerDrop)  notesParts.push(`Drop: ${t.markerDrop}`);
+    if (t.loggermarker) notesParts.push(`LM #${t.loggermarker}`);
+    if (extraTargets)  notesParts.push(extraTargets);
+    const notes = notesParts.join(' · ');
+
+    // Validierung gegen aktuellen Setup-Referenzpunkt
+    let valid = false, error = null, lat = null, lng = null;
+    if (!utmShort) {
+      error = 'Keine Koordinaten gefunden';
+    } else {
+      const r = resolveUtmShort(utmShort, compState.refLat, compState.refLng, compState.utmZone);
+      if (r.ok) { valid = true; lat = r.lat; lng = r.lng; }
+      else error = r.error;
+    }
+
+    rows.push({
+      checked: valid,            // Default: nur valide Tasks vorausgewählt
+      num: t.num,
+      type: t.type,
+      utmShort,
+      scoringStart: '',
+      scoringEnd: t.scoringEnd || '',
+      notes,
+      valid,
+      error,
+      lat, lng,
+    });
+  }
+  // Nach Task-Nummer sortieren
+  rows.sort((a, b) => a.num - b.num);
+  return rows;
+}
+
+function renderImportPreview() {
+  const list = document.getElementById('import-preview');
+  const summary = document.getElementById('import-summary');
+  if (!pendingImportTasks.length) {
+    list.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted); font-style:italic;">Keine Tasks im PDF erkannt.</div>';
+    summary.textContent = '';
+    return;
+  }
+  const validCount = pendingImportTasks.filter(t => t.valid).length;
+  summary.textContent = `${pendingImportTasks.length} Task${pendingImportTasks.length !== 1 ? 's' : ''} erkannt · ${validCount} mit gültigen Koordinaten`;
+
+  list.innerHTML = pendingImportTasks.map((t, idx) => {
+    const cls = t.valid ? '' : 'invalid';
+    const meta = t.notes ? `<div class="import-row-meta">${escapeHtml(t.notes)}${t.scoringEnd ? ` · ends ${escapeHtml(t.scoringEnd)}` : ''}</div>` : (t.scoringEnd ? `<div class="import-row-meta">ends ${escapeHtml(t.scoringEnd)}</div>` : '');
+    const err = t.error ? `<div class="import-row-error">${escapeHtml(t.error)}</div>` : '';
+    return `
+      <div class="import-row ${cls}">
+        <input type="checkbox" data-idx="${idx}" ${t.checked ? 'checked' : ''} ${!t.valid ? '' : ''}>
+        <div class="import-row-body">
+          <div class="import-row-head">
+            <span class="import-row-num">${t.num}</span>
+            <span class="import-row-type">${escapeHtml(t.type)}</span>
+            <span class="import-row-coords">${t.utmShort ? escapeHtml(t.utmShort) : '— keine Koordinate —'}</span>
+          </div>
+          ${meta}
+          ${err}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Checkbox-Handler
+  list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      pendingImportTasks[idx].checked = e.target.checked;
+    });
+  });
+}
+
+async function handlePdfFileSelected(file) {
+  if (!file) return;
+  if (compState.refLat == null || compState.refLng == null) {
+    showToast('Bitte erst Referenzpunkt im Setup ⚙️ setzen — Koordinaten können sonst nicht aufgelöst werden.');
+    return;
+  }
+  showLoading('PDF wird gelesen …');
+  try {
+    const lines = await extractPdfText(file);
+    const parsed = parseTasksheetLines(lines);
+    pendingImportTasks = tasksheetToImportRows(parsed);
+    hideLoading();
+
+    if (!pendingImportTasks.length) {
+      showToast('Keine Tasks im PDF erkannt — falsches Format?');
+      return;
+    }
+    renderImportPreview();
+    openModal('modal-import');
+  } catch (err) {
+    hideLoading();
+    console.error(err);
+    showToast('PDF-Lesefehler: ' + (err.message || err));
+  }
+}
+
+function applyImport(replace) {
+  const selected = pendingImportTasks.filter(t => t.checked && t.valid);
+  if (!selected.length) {
+    showToast('Keine gültigen Tasks ausgewählt');
+    return;
+  }
+  if (replace) {
+    tasksState.tasks = [];
+    appState.activeTaskId = null;
+    activeTargetProfile = null;
+    if (layers.profileLine) { map.removeLayer(layers.profileLine); layers.profileLine = null; }
+  }
+  for (const t of selected) {
+    tasksState.tasks.push({
+      id: tasksState.nextId++,
+      num: t.num,
+      type: t.type,
+      utmShort: t.utmShort,
+      scoringStart: t.scoringStart || '',
+      scoringEnd: t.scoringEnd || '',
+      notes: t.notes || '',
+      lat: t.lat,
+      lng: t.lng,
+    });
+  }
+  saveState();
+  renderTaskMarkers();
+  renderTaskList();
+  renderTargetPanel();
+  closeModal('modal-import');
+  showToast(`${selected.length} Task${selected.length !== 1 ? 's' : ''} importiert`);
+
+  // Karte auf importierte Tasks zentrieren
+  const valid = selected.filter(t => t.lat != null && t.lng != null);
+  if (valid.length) {
+    const bounds = L.latLngBounds(valid.map(t => [t.lat, t.lng]));
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+  }
+}
+
+/* ============================================================
+   TEIL 9: ACTIONS — FLY, THEMING, BASEMAP
+   ============================================================ */
+
+async function startFlyMode() {
+  // Wetter und Terrain laden, dann GPS-Loop läuft schon
+  const refLat = gpsState.hasFix ? gpsState.lastFix.lat : compState.refLat;
+  const refLng = gpsState.hasFix ? gpsState.lastFix.lng : compState.refLng;
+  if (refLat == null) {
+    showToast('Bitte erst GPS-Fix abwarten oder Referenzpunkt setzen');
+    return;
+  }
+  showLoading('Lade Wetterdaten (DWD ICON) …');
+  try {
+    const [forecast, elev] = await Promise.all([
+      fetchWindForecast(refLat, refLng),
+      fetchElevation(refLat, refLng),
+    ]);
+    weatherState.forecast = forecast;
+    weatherState.fetchedAt = Date.now();
+    weatherState.fetchedLat = refLat;
+    weatherState.fetchedLng = refLng;
+    if (elev != null) gpsState.terrainElevM = elev;
+    appState.flying = true;
+    setFlyButton(true);
+    setFlyStatus('ok', 'Wetter geladen · ' + new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
+    showToast('Wetterdaten geladen — Trajektorie aktiv');
+    recomputeTrajectoryNow();
+    if (appState.activeTaskId != null) recomputeActiveTargetProfile();
+    renderTargetPanel();
+  } catch (e) {
+    console.error('Fly start fail', e);
+    showToast('Wetter konnte nicht geladen werden — Internet?');
+    setFlyStatus('err', 'Fehler beim Laden');
+  } finally {
+    hideLoading();
+  }
+}
+
+function stopFlyMode() {
+  appState.flying = false;
+  setFlyButton(false);
+  setFlyStatus('', 'Bereit');
+  // Linien entfernen
+  if (layers.trajectoryLine) { map.removeLayer(layers.trajectoryLine); layers.trajectoryLine = null; }
+  layers.trajectoryTimeMarkers.forEach(m => map.removeLayer(m));
+  layers.trajectoryTimeMarkers = [];
+  if (layers.profileLine) { map.removeLayer(layers.profileLine); layers.profileLine = null; }
+  activeTargetProfile = null;
+  renderTargetPanel();
+}
+
+function setFlyButton(armed) {
+  const btn = document.getElementById('btn-fly');
+  if (!btn) return;
+  if (armed) {
+    btn.classList.add('armed');
+    btn.innerHTML = ICON_STOP;
+    btn.setAttribute('aria-label', 'Fly aktiv · stop');
+  } else {
+    btn.classList.remove('armed');
+    btn.innerHTML = ICON_PLAY;
+    btn.setAttribute('aria-label', 'Fly · Wetter laden');
+  }
+}
+
+function setFlyStatus(level, text) {
+  const dot = document.getElementById('fly-dot');
+  const txt = document.getElementById('fly-text');
+  dot.className = 'status-dot';
+  if (level) dot.classList.add(level);
+  txt.textContent = text;
+}
+
+function toggleTheme() {
+  appState.theme = appState.theme === 'day' ? 'night' : 'day';
+  applyTheme();
+  saveState();
+}
+
+function applyTheme() {
+  document.body.classList.toggle('theme-night', appState.theme === 'night');
+  document.body.classList.toggle('theme-day', appState.theme === 'day');
+  const themeBtn = document.getElementById('btn-theme');
+  if (themeBtn) {
+    themeBtn.innerHTML = appState.theme === 'day'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  }
+  // Trajektorien-Linie neu zeichnen wegen CSS-Var
+  if (appState.flying) recomputeTrajectoryNow();
+}
+
+function toggleBaseMap() {
+  // Zyklus: topo → sat → dark → topo
+  const cycle = { topo: 'sat', sat: 'dark', dark: 'topo' };
+  appState.baseMap = cycle[appState.baseMap] || 'topo';
+  applyBaseMap();
+  updateBaseMapIcon();
+  saveState();
+}
+
+function updateBaseMapIcon() {
+  // Icon bleibt das Layers-SVG. Nur die .active-Klasse markiert nicht-default-Modi (Sat).
+  const btn = document.getElementById('btn-basemap');
+  if (!btn) return;
+  btn.classList.toggle('active', appState.baseMap === 'sat');
+}
+
+function recenterMap() {
+  if (gpsState.hasFix) {
+    map.setView([gpsState.lastFix.lat, gpsState.lastFix.lng], 14, { animate: true });
+  } else if (compState.refLat != null) {
+    map.setView([compState.refLat, compState.refLng], 13, { animate: true });
+  } else {
+    showToast('Keine Position verfügbar');
+  }
+}
+
+
+/* ============================================================
+   TEIL 10: SETUP-MODAL
+   ============================================================ */
+
+function openSetupModal() {
+  document.getElementById('comp-name').value = compState.name || '';
+  document.getElementById('comp-zone').value = compState.utmZone || '32U';
+  if (compState.refLat != null && compState.refLng != null) {
+    document.getElementById('comp-ref-display').textContent =
+      `${compState.refLat.toFixed(5)}, ${compState.refLng.toFixed(5)}`;
+  } else {
+    document.getElementById('comp-ref-display').textContent = 'Nicht gesetzt';
+  }
+  openModal('modal-setup');
+}
+
+function saveSetupFromModal() {
+  compState.name = document.getElementById('comp-name').value.trim();
+  compState.utmZone = document.getElementById('comp-zone').value;
+  saveState();
+  reresolveAllTaskCoords();
+  renderTaskMarkers();
+  renderTaskList();
+  if (appState.activeTaskId != null) recomputeActiveTargetProfile();
+}
+
+function setRefFromGps() {
+  if (!gpsState.hasFix) {
+    showToast('Noch kein GPS-Fix — Karten-Auswahl nutzen');
+    return;
+  }
+  setRefPoint(gpsState.lastFix.lat, gpsState.lastFix.lng);
+  saveState();
+  reresolveAllTaskCoords();
+  renderTaskMarkers();
+  renderTaskList();
+  showToast('Referenzpunkt aus GPS gesetzt');
+}
+
+function startPickRefOnMap() {
+  closeModal('modal-setup');
+  compState.pickingRefOnMap = true;
+  compState.pickingTargetOnMap = false;
+  showToast('Tippe auf die Karte, um den Referenzpunkt zu setzen', 6000);
+  updateMapPickCursor();
+}
+
+/* ---------- Target durch Tippen auf Karte setzen ---------- */
+function startPickTargetOnMap() {
+  if (compState.refLat == null || compState.refLng == null) {
+    showToast('Bitte erst Referenzpunkt im Setup ⚙️ setzen — sonst kann die UTM-Kurzform nicht berechnet werden.');
+    return;
+  }
+  // Toggle: zweiter Tipp auf den Button bricht den Modus ab
+  if (compState.pickingTargetOnMap) {
+    compState.pickingTargetOnMap = false;
+    hideToast();
+    updateMapPickCursor();
+    return;
+  }
+  compState.pickingRefOnMap = false;
+  // Aktiver Task vorhanden → fragen ob verschieben oder neu
+  const activeId = appState.activeTaskId;
+  if (activeId != null) {
+    const t = tasksState.tasks.find(x => x.id === activeId);
+    if (t) {
+      const move = confirm(
+        `Aktiver Task ${t.num} (${t.type}) verschieben?\n\n`
+        + 'OK = aktiven Task an neue Position verschieben\n'
+        + 'Abbrechen = neuen Task anlegen'
+      );
+      compState.pickingTargetOnMap = move ? `relocate-${activeId}` : 'new';
+    } else {
+      compState.pickingTargetOnMap = 'new';
+    }
+  } else {
+    compState.pickingTargetOnMap = 'new';
+  }
+  const hint = compState.pickingTargetOnMap.startsWith('relocate')
+    ? 'Tippe auf Karte — Task wird dorthin verschoben'
+    : 'Tippe auf Karte, um neues Target zu setzen';
+  showToast(hint, 8000);
+  updateMapPickCursor();
+}
+
+function latLngToUtmShort(lat, lng) {
+  // Wandelt eine Position in die DMV-typische 4+4-Kurzform "EEEE NNNN" um
+  // (mittlere Stellen der UTM-Easting/Northing, 10m-Auflösung).
+  const u = latLngToUtm(lat, lng, compState.utmZone);
+  const e4 = String(Math.round((u.easting % 100000) / 10)).padStart(4, '0');
+  const n4 = String(Math.round((u.northing % 100000) / 10)).padStart(4, '0');
+  return `${e4} ${n4}`;
+}
+
+function handleTargetPicked(lat, lng, mode) {
+  const utmShort = latLngToUtmShort(lat, lng);
+  if (mode.startsWith('relocate-')) {
+    const id = parseInt(mode.split('-')[1], 10);
+    const t = tasksState.tasks.find(x => x.id === id);
+    if (!t) {
+      showToast('Aktiver Task nicht mehr gefunden — Pick abgebrochen');
+      return;
+    }
+    t.lat = lat;
+    t.lng = lng;
+    t.utmShort = utmShort;
+    saveState();
+    renderTaskMarkers();
+    renderTaskList();
+    if (appState.activeTaskId === id) recomputeActiveTargetProfile();
+    showToast(`Task ${t.num} verschoben → ${utmShort}`);
+    return;
+  }
+  // Neuer Task: anlegen mit nächster freier Nummer und Default-Typ, dann Modal
+  const newTask = {
+    id: tasksState.nextId++,
+    num: nextTaskNumber(),
+    type: 'PDG',           // Default: Pilot Declared Goal — Pilot kann im Modal ändern
+    utmShort,
+    scoringStart: '',
+    scoringEnd: '',
+    notes: '',
+    lat, lng,
+  };
+  tasksState.tasks.push(newTask);
+  appState.activeTaskId = newTask.id;
+  saveState();
+  renderTaskMarkers();
+  renderTaskList();
+  showToast(`Task ${newTask.num} angelegt → bitte Typ wählen`);
+  // Modal direkt öffnen, damit der Pilot Typ und Notizen bearbeiten kann
+  openTaskModal(newTask.id);
+}
+
+function updateMapPickCursor() {
+  const wrap = document.querySelector('.map-wrap');
+  const btn = document.getElementById('btn-pick-target');
+  if (!wrap) return;
+  const picking = compState.pickingRefOnMap || compState.pickingTargetOnMap;
+  wrap.classList.toggle('picking', !!picking);
+  if (btn) btn.classList.toggle('active', !!compState.pickingTargetOnMap);
+}
+
+function clearAllTasks() {
+  if (!tasksState.tasks.length) return;
+  if (!confirm(`Alle ${tasksState.tasks.length} Tasks löschen?`)) return;
+  tasksState.tasks = [];
+  appState.activeTaskId = null;
+  activeTargetProfile = null;
+  saveState();
+  renderTaskMarkers();
+  renderTaskList();
+  renderProfileLine(null);
+  renderTargetPanel();
+  showToast('Tasks gelöscht');
+}
+
+/* ============================================================
+   TEIL 11: SERVICE WORKER & UPDATE
+   ============================================================ */
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+  } catch (e) {
+    console.warn('SW register fail', e);
+  }
+}
+
+async function checkForUpdate() {
+  showLoading('Suche Update …');
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.update();
+      }
+    }
+    // Hard reload
+    setTimeout(() => location.reload(), 500);
+  } catch (e) {
+    console.warn('Update fail', e);
+    location.reload();
+  }
+}
+
+/* ============================================================
+   TEIL 12: INIT & EVENT-WIRING
+   ============================================================ */
+
+function wireEvents() {
+  document.getElementById('btn-add-task').addEventListener('click', () => openTaskModal(null));
+  document.getElementById('task-save-btn').addEventListener('click', saveTaskFromModal);
+  document.getElementById('task-delete-btn').addEventListener('click', deleteTaskFromModal);
+
+  // PDF-Import: File-Input öffnen → Datei wählen → parsen → Vorschau-Modal
+  const fileInput = document.getElementById('pdf-file-input');
+  document.getElementById('btn-import-pdf').addEventListener('click', () => {
+    if (typeof pdfjsLib === 'undefined') {
+      showToast('PDF-Library nicht geladen — Internet prüfen');
+      return;
+    }
+    fileInput.value = '';   // damit dieselbe Datei nochmal gewählt werden kann
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) handlePdfFileSelected(f);
+  });
+  document.getElementById('btn-import-replace').addEventListener('click', () => applyImport(true));
+  document.getElementById('btn-import-append').addEventListener('click', () => applyImport(false));
+
+  document.getElementById('btn-fly').addEventListener('click', () => {
+    if (appState.flying) stopFlyMode();
+    else startFlyMode();
+  });
+
+  document.getElementById('btn-settings').addEventListener('click', openSetupModal);
+  document.getElementById('btn-theme').addEventListener('click', toggleTheme);
+  document.getElementById('btn-basemap').addEventListener('click', toggleBaseMap);
+  document.getElementById('btn-recenter').addEventListener('click', recenterMap);
+  document.getElementById('btn-pick-target').addEventListener('click', startPickTargetOnMap);
+  document.getElementById('btn-update').addEventListener('click', () => {
+    if (confirm('App-Update suchen und neu laden?')) checkForUpdate();
+  });
+
+  document.getElementById('btn-ref-gps').addEventListener('click', setRefFromGps);
+  document.getElementById('btn-ref-pick').addEventListener('click', startPickRefOnMap);
+  document.getElementById('comp-zone').addEventListener('change', saveSetupFromModal);
+  document.getElementById('comp-name').addEventListener('blur', saveSetupFromModal);
+  document.getElementById('btn-clear-tasks').addEventListener('click', clearAllTasks);
+
+  // Modal-Schließen via Backdrop oder X-Button
+  document.querySelectorAll('[data-close]').forEach(el => {
+    el.addEventListener('click', () => closeModal(el.dataset.close));
+  });
+  document.querySelectorAll('.modal-backdrop').forEach(bd => {
+    bd.addEventListener('click', (e) => {
+      if (e.target === bd) bd.hidden = true;
+    });
+  });
+
+  // Escape: Pick-Modi abbrechen (auch wenn nur tastaturbasiert sinnvoll, schadet nicht auf iPad)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (compState.pickingRefOnMap || compState.pickingTargetOnMap)) {
+      compState.pickingRefOnMap = false;
+      compState.pickingTargetOnMap = false;
+      hideToast();
+      updateMapPickCursor();
+    }
+  });
+
+  // Verhindere ungewolltes Schließen via "Eintippen Enter" in Inputs
+  document.querySelectorAll('.modal input').forEach(inp => {
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // Bei Task-Modal: Speichern auslösen
+        if (document.getElementById('modal-task') && !document.getElementById('modal-task').hidden) {
+          saveTaskFromModal();
+        }
+      }
+    });
+  });
+}
+
+function init() {
+  loadState();
+  applyTheme();
+  initMap();
+  wireEvents();
+  updateBaseMapIcon();
+  renderTaskMarkers();
+  renderTaskList();
+  renderTargetPanel();
+  setFlyStatus('', 'Bereit');
+  startGps();
+  registerServiceWorker();
+
+  // Wenn beim Laden ein activeTaskId gesetzt ist, Panel neu rendern
+  if (appState.activeTaskId != null) {
+    renderTargetPanel();
+  }
+
+  // Kontinuierliches Refresh der Distanzen in der Liste
+  setInterval(() => {
+    if (gpsState.hasFix) renderTaskList();
+    if (appState.activeTaskId != null) renderTargetPanel();
+  }, 4000);
+
+  // Initial-Hinweis
+  if (!compState.refLat) {
+    setTimeout(() => {
+      showToast('Tipp: Erst Referenzpunkt im Setup ⚙️ setzen', 4000);
+    }, 1200);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+</script>
+</body>
+</html>

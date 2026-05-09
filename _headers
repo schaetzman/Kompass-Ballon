@@ -1,0 +1,26 @@
+# Service-Worker: muss vom Root scopen können, kein Caching im Browser
+/service-worker.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Service-Worker-Allowed: /
+
+# Manifest: kurzer Cache, damit PWA-Updates schnell ankommen
+/manifest.webmanifest
+  Cache-Control: public, max-age=300
+  Content-Type: application/manifest+json
+
+# HTML: kurzer Cache, damit neue Versionen sichtbar werden
+/index.html
+  Cache-Control: public, max-age=300
+/
+  Cache-Control: public, max-age=300
+
+# Icons: lange cachen, sind versionsstabil
+/icons/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Sicherheits-Header
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(self)
